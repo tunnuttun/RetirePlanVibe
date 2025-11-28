@@ -1,0 +1,172 @@
+
+import React, { useState, useEffect } from 'react';
+import { Dashboard } from './components/Dashboard';
+import { InputForm } from './components/InputForm';
+import { AIAdvisor } from './components/AIAdvisor';
+import { FinancialPlan, DEFAULT_PLAN, ViewState, Language } from './types';
+import { t } from './utils/locales';
+
+// Icons
+const ChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>;
+const SlidersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>;
+const MessageIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>;
+const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
+const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>;
+
+function App() {
+  const [plan, setPlan] = useState<FinancialPlan>(DEFAULT_PLAN);
+  const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [lang, setLang] = useState<Language>('en');
+
+  // Persistence
+  useEffect(() => {
+    const savedPlan = localStorage.getItem('retireplan_data_v2');
+    if (savedPlan) {
+      try {
+        setPlan(JSON.parse(savedPlan));
+      } catch (e) {
+        console.error("Failed to parse saved plan", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('retireplan_data_v2', JSON.stringify(plan));
+  }, [plan]);
+
+  const handleExport = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(plan));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `retirement_plan_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        if (json.assets && json.debts) {
+          setPlan(json);
+          alert("Plan loaded successfully!");
+        } else {
+          alert("Invalid file format.");
+        }
+      } catch (err) {
+        alert("Error reading file.");
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+      
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+              R
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-800">{t('app_title', lang)}</h1>
+          </div>
+
+          <div className="flex items-center gap-4">
+             {/* Language Toggle */}
+            <div className="flex bg-slate-100 rounded-lg p-1">
+              <button 
+                onClick={() => setLang('en')}
+                className={`px-2 py-1 text-xs font-bold rounded ${lang === 'en' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+              >
+                EN
+              </button>
+              <button 
+                onClick={() => setLang('th')}
+                className={`px-2 py-1 text-xs font-bold rounded ${lang === 'th' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+              >
+                TH
+              </button>
+            </div>
+
+            {/* Desktop Actions */}
+            <div className="hidden md:flex items-center gap-2">
+              <button 
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors"
+              >
+                <DownloadIcon /> {t('export', lang)}
+              </button>
+              <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer">
+                <UploadIcon /> {t('import', lang)}
+                <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 p-4 md:p-6 overflow-hidden">
+        {currentView === ViewState.DASHBOARD && <Dashboard plan={plan} lang={lang} />}
+        {currentView === ViewState.INPUTS && <InputForm plan={plan} onChange={setPlan} lang={lang} />}
+        {currentView === ViewState.ADVISOR && <AIAdvisor plan={plan} lang={lang} />}
+      </main>
+
+      {/* Mobile Nav */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe z-30">
+        <div className="max-w-md mx-auto flex justify-around p-2">
+          <button 
+            onClick={() => setCurrentView(ViewState.DASHBOARD)}
+            className={`flex flex-col items-center p-2 rounded-xl flex-1 transition-all ${
+              currentView === ViewState.DASHBOARD ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <ChartIcon />
+            <span className="text-xs font-medium mt-1">{t('dashboard', lang)}</span>
+          </button>
+          
+          <button 
+            onClick={() => setCurrentView(ViewState.INPUTS)}
+            className={`flex flex-col items-center p-2 rounded-xl flex-1 transition-all ${
+              currentView === ViewState.INPUTS ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <SlidersIcon />
+            <span className="text-xs font-medium mt-1">{t('inputs', lang)}</span>
+          </button>
+
+          <button 
+            onClick={() => setCurrentView(ViewState.ADVISOR)}
+            className={`flex flex-col items-center p-2 rounded-xl flex-1 transition-all ${
+              currentView === ViewState.ADVISOR ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <MessageIcon />
+            <span className="text-xs font-medium mt-1">{t('advisor', lang)}</span>
+          </button>
+        </div>
+        
+         <div className="md:hidden border-t border-slate-100 flex justify-center py-2 bg-slate-50 gap-4 text-xs text-slate-500">
+           <button onClick={handleExport} className="hover:text-blue-600">{t('export', lang)}</button>
+           <span className="text-slate-300">|</span>
+           <label className="cursor-pointer hover:text-blue-600">
+             {t('import', lang)}
+             <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+           </label>
+        </div>
+      </nav>
+
+      <div className="h-24 md:h-0" />
+    </div>
+  );
+}
+
+export default App;

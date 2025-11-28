@@ -1,0 +1,70 @@
+
+import { GoogleGenAI } from "@google/genai";
+import { FinancialPlan, SimulationResult } from "../types";
+import { formatCurrency } from "../utils/finance";
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+export const generateFinancialAdvice = async (
+  plan: FinancialPlan, 
+  projections: SimulationResult[],
+  userQuery: string
+): Promise<string> => {
+  
+  const retirementYear = projections.find(p => p.age === plan.retirementAge);
+  const endOfLife = projections[projections.length - 1];
+  
+  // Summarize complex arrays for AI Context to save tokens
+  const assetSummary = plan.assets.map(a => {
+    let desc = `${a.name}: ${formatCurrency(a.value)} (Rate: ${a.interestRate}%)`;
+    if (a.contributionAmount > 0) {
+      desc += ` + Adding ${formatCurrency(a.contributionAmount)}/${a.contributionFrequency}`;
+    }
+    return desc;
+  }).join('\n');
+
+  const debtSummary = plan.debts.map(d => `${d.name}: ${formatCurrency(d.value)}`).join(', ');
+  
+  const context = `
+    User Financial Profile:
+    - Current Age: ${plan.currentAge}
+    - Retirement Age: ${plan.retirementAge}
+    - General Inflation: ${plan.inflation.general}%
+    - Medical Inflation: ${plan.inflation.medical}%
+    
+    Assets & Contributions:
+    ${assetSummary}
+    
+    Debts: ${debtSummary}
+    
+    Projection Outcomes:
+    - Net Worth at Retirement (${plan.retirementAge}): ${retirementYear ? formatCurrency(retirementYear.netWorth) : 'N/A'}
+    - Total Debt at Retirement: ${retirementYear ? formatCurrency(retirementYear.totalDebt) : 'N/A'}
+    - Net Worth at Age 95: ${endOfLife ? formatCurrency(endOfLife.netWorth) : 'N/A'}
+    - Status: ${endOfLife && endOfLife.netWorth > 0 ? 'Sustainable' : 'Runs out of money'}
+  `;
+
+  const systemInstruction = `
+    You are a financial planner. Analyze the profile. 
+    Specific details on assets and debts are provided.
+    Give specific advice on debt payoff strategies or asset allocation if mentioned.
+    If the user has medical inflation concerns, address them.
+    Keep answers concise and actionable.
+    Format with Markdown.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Context: ${context}\n\nUser Question: ${userQuery}`,
+      config: {
+        systemInstruction: systemInstruction,
+      }
+    });
+
+    return response.text || "I couldn't generate a response at this time.";
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return "I'm having trouble connecting to my financial brain right now.";
+  }
+};
