@@ -1,14 +1,13 @@
 
-
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   INPUTS = 'INPUTS',
-  ADVISOR = 'ADVISOR',
 }
 
 export type InflationType = 'general' | 'medical';
 export type Frequency = 'monthly' | 'yearly';
 export type Language = 'en' | 'th';
+export type CurrencyCode = 'USD' | 'THB';
 
 export interface BaseItem {
   id: string;
@@ -50,6 +49,8 @@ export interface PayoffStrategy {
 export interface FinancialPlan {
   currentAge: number;
   retirementAge: number;
+  maxAge: number;
+  currency: CurrencyCode;
   inflation: {
     general: number;
     medical: number;
@@ -69,15 +70,26 @@ export interface SimulationResult {
   netWorth: number;
   totalIncome: number;
   totalExpenses: number;
+  totalInvestments: number;
+  totalDebtPayments: number;
   liquidCash: number; 
   isRetired: boolean;
   assetBreakdown: Record<string, number>; 
   debtBreakdown: Record<string, number>;
+  incomeBreakdown: Record<string, number>;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+  timestamp: number;
 }
 
 export const DEFAULT_PLAN: FinancialPlan = {
   currentAge: 30,
   retirementAge: 60,
+  maxAge: 90,
+  currency: 'USD',
   inflation: {
     general: 3.0,
     medical: 5.0,
@@ -123,9 +135,3 @@ export const DEFAULT_PLAN: FinancialPlan = {
     { id: 'pay2', debtId: 'd2', frequency: 'monthly', amount: 400, extraYearlyAmount: 0, yearlyIncrement: 0 },
   ],
 };
-
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-  timestamp: number;
-}

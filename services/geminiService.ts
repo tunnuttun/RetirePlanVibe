@@ -1,9 +1,11 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { FinancialPlan, SimulationResult } from "../types";
 import { formatCurrency } from "../utils/finance";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Use import.meta.env for Vite, fallback to process.env if needed
+const API_KEY = import.meta.env.VITE_API_KEY || process.env.API_KEY;
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const generateFinancialAdvice = async (
   plan: FinancialPlan, 
@@ -16,19 +18,21 @@ export const generateFinancialAdvice = async (
   
   // Summarize complex arrays for AI Context to save tokens
   const assetSummary = plan.assets.map(a => {
-    let desc = `${a.name}: ${formatCurrency(a.value)} (Rate: ${a.interestRate}%)`;
+    let desc = `${a.name}: ${formatCurrency(a.value, plan.currency)} (Rate: ${a.interestRate}%)`;
     if (a.contributionAmount > 0) {
-      desc += ` + Adding ${formatCurrency(a.contributionAmount)}/${a.contributionFrequency}`;
+      desc += ` + Adding ${formatCurrency(a.contributionAmount, plan.currency)}/${a.contributionFrequency}`;
     }
     return desc;
   }).join('\n');
 
-  const debtSummary = plan.debts.map(d => `${d.name}: ${formatCurrency(d.value)}`).join(', ');
+  const debtSummary = plan.debts.map(d => `${d.name}: ${formatCurrency(d.value, plan.currency)}`).join(', ');
   
   const context = `
     User Financial Profile:
     - Current Age: ${plan.currentAge}
     - Retirement Age: ${plan.retirementAge}
+    - Life Expectancy / Max Age: ${plan.maxAge}
+    - Currency: ${plan.currency}
     - General Inflation: ${plan.inflation.general}%
     - Medical Inflation: ${plan.inflation.medical}%
     
@@ -38,9 +42,9 @@ export const generateFinancialAdvice = async (
     Debts: ${debtSummary}
     
     Projection Outcomes:
-    - Net Worth at Retirement (${plan.retirementAge}): ${retirementYear ? formatCurrency(retirementYear.netWorth) : 'N/A'}
-    - Total Debt at Retirement: ${retirementYear ? formatCurrency(retirementYear.totalDebt) : 'N/A'}
-    - Net Worth at Age 95: ${endOfLife ? formatCurrency(endOfLife.netWorth) : 'N/A'}
+    - Net Worth at Retirement (${plan.retirementAge}): ${retirementYear ? formatCurrency(retirementYear.netWorth, plan.currency) : 'N/A'}
+    - Total Debt at Retirement: ${retirementYear ? formatCurrency(retirementYear.totalDebt, plan.currency) : 'N/A'}
+    - Net Worth at End of Plan (${endOfLife?.age || 'N/A'}): ${endOfLife ? formatCurrency(endOfLife.netWorth, plan.currency) : 'N/A'}
     - Status: ${endOfLife && endOfLife.netWorth > 0 ? 'Sustainable' : 'Runs out of money'}
   `;
 

@@ -1,12 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FinancialPlan, Language } from '../types';
 import { t } from '../utils/locales';
+import { formatCurrency } from '../utils/finance';
 
 interface InputFormProps {
   plan: FinancialPlan;
   onChange: (newPlan: FinancialPlan) => void;
   lang: Language;
 }
+
+const GripIcon = () => (
+  <svg className="w-4 h-4 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="5" r="1"></circle>
+    <circle cx="9" cy="12" r="1"></circle>
+    <circle cx="9" cy="19" r="1"></circle>
+    <circle cx="15" cy="5" r="1"></circle>
+    <circle cx="15" cy="12" r="1"></circle>
+    <circle cx="15" cy="19" r="1"></circle>
+  </svg>
+);
 
 const Section = ({ title, children, className = "" }: { title: string, children?: React.ReactNode, className?: string }) => (
   <div className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6 ${className}`}>
@@ -20,11 +34,9 @@ const Section = ({ title, children, className = "" }: { title: string, children?
 );
 
 const Input = ({ label, value, onChange, type = "number", className = "", placeholder = "", disabled = false }: any) => {
-  // Use local state to manage the input value to allow for intermediate states (like empty string or "0.")
   const [localValue, setLocalValue] = useState(value !== undefined ? value.toString() : "");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync with parent value updates when not editing (e.g. loaded from file)
   useEffect(() => {
     if (document.activeElement !== inputRef.current) {
       setLocalValue(value !== undefined ? value.toString() : "");
@@ -36,7 +48,6 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
     setLocalValue(rawValue);
 
     if (type === 'number') {
-      // Allow empty string to mean 0 in data, but keep empty in UI while typing
       if (rawValue === '') {
         onChange(0);
       } else {
@@ -51,7 +62,6 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
   };
 
   const handleBlur = () => {
-    // On blur, normalize the display value to match the stored data (fixes "00" or invalid chars)
     if (type === 'number') {
       const num = parseFloat(localValue);
       if (isNaN(num) || localValue === '') {
@@ -63,7 +73,6 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
   };
 
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
-    // Select all text on focus for easy overwriting
     e.target.select();
   };
 
@@ -72,7 +81,6 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
       {label && <label className="text-xs font-semibold text-slate-500 mb-1">{label}</label>}
       <input
         ref={inputRef}
-        // Use 'text' type even for numbers to allow flexible input (empty string, decimals) without browser enforcement
         type={type === 'number' ? 'text' : type} 
         inputMode={type === 'number' ? 'decimal' : undefined}
         value={localValue}
@@ -104,6 +112,7 @@ const Select = ({ label, value, onChange, options, className = "", disabled=fals
 );
 
 export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) => {
+  const [draggedItem, setDraggedItem] = useState<{ listKey: keyof FinancialPlan, index: number } | null>(null);
   
   const updatePlan = (key: keyof FinancialPlan, value: any) => {
     onChange({ ...plan, [key]: value });
@@ -113,7 +122,6 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
     onChange({ ...plan, inflation: { ...plan.inflation, [key]: val } });
   };
 
-  // Helper to update item in an array
   const updateItem = (listKey: keyof FinancialPlan, id: string, field: string, val: any) => {
     const list = (plan[listKey] as any[]).map(item => 
       item.id === id ? { ...item, [field]: val } : item
@@ -123,81 +131,180 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
 
   const addItem = (listKey: keyof FinancialPlan, newItem: any) => {
     const list = [...(plan[listKey] as any[]), newItem];
-    
-    // Logic for Auto-creating payment entry when a new debt is added
     let updatedPlan = { ...plan, [listKey]: list };
     if (listKey === 'debts') {
        const newPayment = { 
          id: Date.now().toString() + '_pay', 
          debtId: newItem.id, 
          amount: 0, 
-         frequency: 'monthly', 
+         frequency: 'monthly' as const, 
          extraYearlyAmount: 0, 
          yearlyIncrement: 0 
       };
       updatedPlan.debtPayments = [...updatedPlan.debtPayments, newPayment];
     }
-
     onChange(updatedPlan);
   };
 
   const removeItem = (listKey: keyof FinancialPlan, id: string) => {
     const list = (plan[listKey] as any[]).filter(item => item.id !== id);
-    
-    // Cleanup payments if debt is removed
     let updatedPlan = { ...plan, [listKey]: list };
     if (listKey === 'debts') {
       updatedPlan.debtPayments = updatedPlan.debtPayments.filter(p => p.debtId !== id);
     }
-    
     onChange(updatedPlan);
   };
+
+  // Drag and Drop Handlers
+  const handleDragStart = (e: React.DragEvent, listKey: keyof FinancialPlan, index: number) => {
+    setDraggedItem({ listKey, index });
+    // Required for Firefox
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault(); // Necessary to allow dropping
+  };
+
+  const handleDrop = (e: React.DragEvent, listKey: keyof FinancialPlan, index: number) => {
+    e.preventDefault();
+    if (!draggedItem || draggedItem.listKey !== listKey || draggedItem.index === index) {
+      setDraggedItem(null);
+      return;
+    }
+
+    const list = [...(plan[listKey] as any[])];
+    const itemToMove = list[draggedItem.index];
+    
+    // Remove from old position
+    list.splice(draggedItem.index, 1);
+    // Insert at new position
+    list.splice(index, 0, itemToMove);
+
+    updatePlan(listKey, list);
+    setDraggedItem(null);
+  };
+
+  // --- Real-time Validation Logic ---
+  const validationResult = useMemo(() => {
+    const currentAge = plan.currentAge;
+    const annualize = (val: number, freq: 'monthly' | 'yearly') => freq === 'monthly' ? val * 12 : val;
+
+    const totalIncome = plan.incomes
+      .filter(i => currentAge >= i.startAge && (!i.endAge || currentAge <= i.endAge))
+      .reduce((sum, i) => sum + annualize(i.value, i.frequency), 0);
+
+    const totalExpenses = plan.expenses
+      .filter(e => currentAge >= e.startAge && (!e.endAge || currentAge <= e.endAge))
+      .reduce((sum, e) => sum + annualize(e.value, e.frequency), 0);
+
+    const totalInvestments = plan.assets
+      .filter(a => currentAge >= a.contributionStartAge && (!a.contributionEndAge || currentAge <= a.contributionEndAge))
+      .reduce((sum, a) => sum + annualize(a.contributionAmount, a.contributionFrequency), 0);
+
+    const totalDebtPayments = plan.debtPayments
+      .reduce((sum, p) => sum + annualize(p.amount, p.frequency) + (p.extraYearlyAmount || 0), 0);
+
+    const totalOutflow = totalExpenses + totalInvestments + totalDebtPayments;
+    const yearlyDeficit = totalOutflow - totalIncome;
+    
+    return {
+      isDeficit: yearlyDeficit > 0,
+      monthlyDeficit: yearlyDeficit / 12
+    };
+  }, [plan]);
 
   return (
     <div className="max-w-4xl mx-auto pb-24 space-y-6">
       
+      {/* Warning Banner */}
+      {validationResult.isDeficit && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r shadow-sm sticky top-0 z-10">
+          <div className="flex items-start">
+             <div className="flex-shrink-0">
+               <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+               </svg>
+             </div>
+             <div className="ml-3">
+               <h3 className="text-sm font-medium text-red-800">{t('warn_deficit_title', lang)}</h3>
+               <div className="mt-1 text-sm text-red-700">
+                 {t('warn_deficit_msg', lang).replace('{amount}', formatCurrency(validationResult.monthlyDeficit, plan.currency))}
+               </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. Profile & Inflation */}
       <Section title={t('section_profile', lang)}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Input label={t('age_current', lang)} value={plan.currentAge} onChange={(v: number) => updatePlan('currentAge', v)} />
           <Input label={t('age_retire', lang)} value={plan.retirementAge} onChange={(v: number) => updatePlan('retirementAge', v)} />
+          <Input label={t('age_max', lang)} value={plan.maxAge} onChange={(v: number) => updatePlan('maxAge', v)} />
+          <Select 
+            label={t('lbl_currency', lang)} 
+            value={plan.currency || 'USD'} 
+            options={[{value: 'USD', label: 'USD ($)'}, {value: 'THB', label: 'THB (฿)'}]} 
+            onChange={(v: string) => updatePlan('currency', v)} 
+          />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-slate-50">
           <Input label={t('inf_gen', lang)} value={plan.inflation.general} onChange={(v: number) => updateInflation('general', v)} />
           <Input label={t('inf_med', lang)} value={plan.inflation.medical} onChange={(v: number) => updateInflation('medical', v)} />
         </div>
       </Section>
 
-      {/* 2. Assets & Investments (Merged) */}
+      {/* 2. Assets & Investments */}
       <Section title={t('section_assets', lang)}>
-        {plan.assets.map(item => {
-          const isCash = item.name.toLowerCase() === 'cash';
+        <p className="text-xs text-blue-600 mb-3 bg-blue-50 p-2 rounded">
+          <span className="font-bold">Note:</span> {t('note_priority', lang)}
+        </p>
+        {plan.assets.map((item, index) => {
+          const lowerName = item.name.toLowerCase();
+          const isCash = lowerName.includes('cash') || lowerName.includes('saving');
           return (
-            <div key={item.id} className="bg-slate-50/50 p-3 rounded-lg border border-slate-200 mb-3 hover:border-blue-200 transition-colors">
+            <div 
+              key={item.id} 
+              draggable
+              onDragStart={(e) => handleDragStart(e, 'assets', index)}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, 'assets', index)}
+              className="bg-slate-50/50 p-3 rounded-lg border border-slate-200 mb-3 hover:border-blue-200 transition-colors group"
+            >
               {/* Row 1: Basic Info */}
-              <div className="grid grid-cols-12 gap-3 items-end mb-3">
-                <Input className="col-span-6 md:col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('assets', item.id, 'name', v)} />
-                <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('assets', item.id, 'value', v)} />
-                <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('assets', item.id, 'interestRate', v)} />
-                <button onClick={() => removeItem('assets', item.id)} className="col-span-12 md:col-span-1 text-red-400 hover:text-red-600 flex justify-end md:justify-center md:pb-2">×</button>
-              </div>
-              
-              {/* Row 2: Contribution Info */}
-              <div className="grid grid-cols-12 gap-3 items-end pt-2 border-t border-slate-100">
-                <div className="col-span-12 md:col-span-2 text-xs font-bold text-blue-600 flex items-center h-full pt-2 md:pt-0">
-                  {t('col_contrib', lang)}:
-                </div>
-                {isCash ? (
-                   <div className="col-span-10 flex items-center text-xs text-slate-400 italic pl-1">
-                     * Cash assets absorb surplus income automatically. Manual contribution disabled.
-                   </div>
-                ) : (
-                  <>
-                    <Input className="col-span-4 md:col-span-2" label={t('col_amt', lang)} value={item.contributionAmount} onChange={(v: number) => updateItem('assets', item.id, 'contributionAmount', v)} />
-                    <Select className="col-span-4 md:col-span-2" label={t('col_freq', lang)} value={item.contributionFrequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('assets', item.id, 'contributionFrequency', v)} />
-                    <Input className="col-span-2 md:col-span-2" label={t('col_start', lang)} value={item.contributionStartAge} onChange={(v: number) => updateItem('assets', item.id, 'contributionStartAge', v)} />
-                    <Input className="col-span-2 md:col-span-2" label={t('col_end', lang)} value={item.contributionEndAge || ''} placeholder="95" onChange={(v: number) => updateItem('assets', item.id, 'contributionEndAge', v)} />
-                    <Input className="col-span-2 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} onChange={(v: number) => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
-                  </>
-                )}
+              <div className="flex items-start gap-2">
+                 <div className="mt-8 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600">
+                    <GripIcon />
+                 </div>
+                 <div className="flex-1">
+                    <div className="grid grid-cols-12 gap-3 items-end mb-3">
+                      <Input className="col-span-6 md:col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('assets', item.id, 'name', v)} />
+                      <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('assets', item.id, 'value', v)} />
+                      <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('assets', item.id, 'interestRate', v)} />
+                      <button onClick={() => removeItem('assets', item.id)} className="col-span-12 md:col-span-1 text-red-400 hover:text-red-600 flex justify-end md:justify-center md:pb-2">×</button>
+                    </div>
+                    
+                    {/* Row 2: Contribution Info */}
+                    <div className="grid grid-cols-12 gap-3 items-end pt-2 border-t border-slate-100">
+                      <div className="col-span-12 md:col-span-2 text-xs font-bold text-blue-600 flex items-center h-full pt-2 md:pt-0">
+                        {t('col_contrib', lang)}:
+                      </div>
+                      {isCash ? (
+                        <div className="col-span-10 flex items-center text-xs text-slate-400 italic pl-1">
+                          * Cash/Savings absorb surplus income automatically. Manual contribution disabled.
+                        </div>
+                      ) : (
+                        <>
+                          <Input className="col-span-4 md:col-span-2" label={t('col_amt', lang)} value={item.contributionAmount} onChange={(v: number) => updateItem('assets', item.id, 'contributionAmount', v)} />
+                          <Select className="col-span-4 md:col-span-2" label={t('col_freq', lang)} value={item.contributionFrequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('assets', item.id, 'contributionFrequency', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_start', lang)} value={item.contributionStartAge} onChange={(v: number) => updateItem('assets', item.id, 'contributionStartAge', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_end', lang)} value={item.contributionEndAge || ''} placeholder={plan.maxAge.toString()} onChange={(v: number) => updateItem('assets', item.id, 'contributionEndAge', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} onChange={(v: number) => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
+                        </>
+                      )}
+                    </div>
+                 </div>
               </div>
             </div>
           );
@@ -223,12 +330,22 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
 
       {/* 3. Debts */}
       <Section title={t('section_debts', lang)}>
-        {plan.debts.map(item => (
-          <div key={item.id} className="grid grid-cols-12 gap-2 items-end bg-slate-50/50 p-2 rounded mb-2">
-            <Input className="col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('debts', item.id, 'name', v)} />
-            <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('debts', item.id, 'value', v)} />
-            <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('debts', item.id, 'interestRate', v)} />
-            <button onClick={() => removeItem('debts', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+        {plan.debts.map((item, index) => (
+          <div 
+            key={item.id} 
+            draggable
+            onDragStart={(e) => handleDragStart(e, 'debts', index)}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, 'debts', index)}
+            className="flex items-center gap-2 bg-slate-50/50 p-2 rounded mb-2"
+          >
+            <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
+            <div className="flex-1 grid grid-cols-12 gap-2 items-end">
+               <Input className="col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('debts', item.id, 'name', v)} />
+               <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('debts', item.id, 'value', v)} />
+               <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('debts', item.id, 'interestRate', v)} />
+               <button onClick={() => removeItem('debts', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+            </div>
           </div>
         ))}
          {plan.debts.length < 20 && (
@@ -243,15 +360,25 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
 
       {/* 4. Income */}
       <Section title={t('section_income', lang)}>
-        {plan.incomes.map(item => (
-          <div key={item.id} className="grid grid-cols-12 gap-2 items-end bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2">
-            <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('incomes', item.id, 'name', v)} />
-            <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('incomes', item.id, 'value', v)} />
-            <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('incomes', item.id, 'frequency', v)} />
-            <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} onChange={(v: number) => updateItem('incomes', item.id, 'startAge', v)} />
-            <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} placeholder="60" onChange={(v: number) => updateItem('incomes', item.id, 'endAge', v)} />
-            <Input className="col-span-2" label={t('col_inc', lang)} value={item.growthRate} onChange={(v: number) => updateItem('incomes', item.id, 'growthRate', v)} />
-            <button onClick={() => removeItem('incomes', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+        {plan.incomes.map((item, index) => (
+          <div 
+            key={item.id} 
+            draggable
+            onDragStart={(e) => handleDragStart(e, 'incomes', index)}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, 'incomes', index)}
+            className="flex items-center gap-2 bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2"
+          >
+             <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
+             <div className="flex-1 grid grid-cols-12 gap-2 items-end">
+               <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('incomes', item.id, 'name', v)} />
+               <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('incomes', item.id, 'value', v)} />
+               <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('incomes', item.id, 'frequency', v)} />
+               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} onChange={(v: number) => updateItem('incomes', item.id, 'startAge', v)} />
+               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} placeholder={plan.retirementAge.toString()} onChange={(v: number) => updateItem('incomes', item.id, 'endAge', v)} />
+               <Input className="col-span-2" label={t('col_inc', lang)} value={item.growthRate} onChange={(v: number) => updateItem('incomes', item.id, 'growthRate', v)} />
+               <button onClick={() => removeItem('incomes', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+             </div>
           </div>
         ))}
          {plan.incomes.length < 20 && (
@@ -266,14 +393,25 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
 
       {/* 5. Expenses */}
       <Section title={t('section_expenses', lang)}>
-        {plan.expenses.map(item => (
-          <div key={item.id} className="grid grid-cols-12 gap-2 items-end bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2">
-            <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('expenses', item.id, 'name', v)} />
-            <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('expenses', item.id, 'value', v)} />
-            <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('expenses', item.id, 'frequency', v)} />
-             <Select className="col-span-2" label="Type" value={item.type || 'general'} options={[{value: 'general', label: 'Gen'}, {value: 'medical', label: 'Med'}]} onChange={(v: string) => updateItem('expenses', item.id, 'type', v)} />
-            <Input className="col-span-2" label={t('col_end', lang)} value={item.endAge || ''} placeholder="95" onChange={(v: number) => updateItem('expenses', item.id, 'endAge', v)} />
-            <button onClick={() => removeItem('expenses', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+        {plan.expenses.map((item, index) => (
+          <div 
+             key={item.id} 
+             draggable
+             onDragStart={(e) => handleDragStart(e, 'expenses', index)}
+             onDragOver={handleDragOver}
+             onDrop={(e) => handleDrop(e, 'expenses', index)}
+             className="flex items-center gap-2 bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2"
+          >
+            <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
+            <div className="flex-1 grid grid-cols-12 gap-2 items-end">
+               <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('expenses', item.id, 'name', v)} />
+               <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('expenses', item.id, 'value', v)} />
+               <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('expenses', item.id, 'frequency', v)} />
+               <Select className="col-span-2" label="Type" value={item.type || 'general'} options={[{value: 'general', label: 'Gen'}, {value: 'medical', label: 'Med'}]} onChange={(v: string) => updateItem('expenses', item.id, 'type', v)} />
+               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge || plan.currentAge} onChange={(v: number) => updateItem('expenses', item.id, 'startAge', v)} />
+               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} placeholder={plan.maxAge.toString()} onChange={(v: number) => updateItem('expenses', item.id, 'endAge', v)} />
+               <button onClick={() => removeItem('expenses', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+            </div>
           </div>
         ))}
         {plan.expenses.length < 30 && (
@@ -291,24 +429,33 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
         <p className="text-xs text-slate-400 mb-3 italic">
            * Payment entries are created automatically when debts are added. You can also add extra manual payments.
         </p>
-        {plan.debtPayments.map(item => {
-           // Find linked debt name for display
+        {plan.debtPayments.map((item, index) => {
            const linkedDebt = plan.debts.find(d => d.id === item.debtId);
            return (
-            <div key={item.id} className="grid grid-cols-12 gap-2 items-end bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2">
-               <Select 
-                className="col-span-3" 
-                label="Loan" 
-                value={item.debtId} 
-                options={linkedDebt ? [{value: linkedDebt.id, label: linkedDebt.name}] : plan.debts.map(d => ({value: d.id, label: d.name}))} 
-                onChange={(v: string) => updateItem('debtPayments', item.id, 'debtId', v)} 
-                disabled={!!linkedDebt} // Lock to the auto-created debt to prevent confusion, unless it's a manual one
-              />
-              <Input className="col-span-2" label={t('col_amt', lang)} value={item.amount} onChange={(v: number) => updateItem('debtPayments', item.id, 'amount', v)} />
-              <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('debtPayments', item.id, 'frequency', v)} />
-              <Input className="col-span-2" label="Extra/Yr" value={item.extraYearlyAmount} onChange={(v: number) => updateItem('debtPayments', item.id, 'extraYearlyAmount', v)} />
-              <Input className="col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} onChange={(v: number) => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
-              <button onClick={() => removeItem('debtPayments', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+            <div 
+               key={item.id} 
+               draggable
+               onDragStart={(e) => handleDragStart(e, 'debtPayments', index)}
+               onDragOver={handleDragOver}
+               onDrop={(e) => handleDrop(e, 'debtPayments', index)}
+               className="flex items-center gap-2 bg-slate-50/50 p-2 rounded border-b border-slate-100 last:border-0 mb-2"
+            >
+               <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
+               <div className="flex-1 grid grid-cols-12 gap-2 items-end">
+                  <Select 
+                   className="col-span-3" 
+                   label="Loan" 
+                   value={item.debtId} 
+                   options={linkedDebt ? [{value: linkedDebt.id, label: linkedDebt.name}] : plan.debts.map(d => ({value: d.id, label: d.name}))} 
+                   onChange={(v: string) => updateItem('debtPayments', item.id, 'debtId', v)} 
+                   disabled={!!linkedDebt}
+                 />
+                 <Input className="col-span-2" label={t('col_amt', lang)} value={item.amount} onChange={(v: number) => updateItem('debtPayments', item.id, 'amount', v)} />
+                 <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('debtPayments', item.id, 'frequency', v)} />
+                 <Input className="col-span-2" label="Extra/Yr" value={item.extraYearlyAmount} onChange={(v: number) => updateItem('debtPayments', item.id, 'extraYearlyAmount', v)} />
+                 <Input className="col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} onChange={(v: number) => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
+                 <button onClick={() => removeItem('debtPayments', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+               </div>
             </div>
            );
         })}

@@ -7,7 +7,6 @@ const resources = {
     app_title: "RetirePlan",
     dashboard: "Dashboard",
     inputs: "Inputs",
-    advisor: "Advisor",
     export: "Export",
     import: "Import",
     
@@ -15,6 +14,8 @@ const resources = {
     section_profile: "Profile & Inflation",
     age_current: "Current Age",
     age_retire: "Retirement Age",
+    age_max: "Life Expectancy",
+    lbl_currency: "Currency",
     inf_gen: "General Inflation (%)",
     inf_med: "Medical Inflation (%)",
     
@@ -36,30 +37,38 @@ const resources = {
     
     lbl_monthly: "Monthly",
     lbl_yearly: "Yearly",
+    lbl_debt_payments: "Debt Payments",
+    lbl_investments: "Investments",
     
     btn_add: "+ Add Item",
     btn_remove: "Remove",
+    
+    note_priority: "Assets are prioritized from top to bottom. If liquidity is low, lower items may not receive contributions. Drag items to reorder.",
+
+    warn_deficit_title: "Budget Deficit Detected",
+    warn_deficit_msg: "Your total outflows (expenses + investments + debt) exceed your income by {amount}/month. Cash reserves will deplete rapidly.",
 
     // Dashboard
     chart_wealth: "Wealth Projection",
+    chart_income: "Income Analysis",
+    chart_outflow: "Outflow Analysis",
+    chart_cashflow: "Yearly Net Cash Flow",
     chart_assets_detail: "Assets Growth by Type",
     chart_debts_detail: "Debt Payoff by Type",
-    chart_breakdown: "Asset Breakdown",
     chart_expense: "Expense Breakdown",
     stat_nw: "Net Worth @ Retirement",
     stat_sus: "Plan Sustainability",
-    msg_sus: "Assets last until 95+",
+    msg_sus: "Assets last until End",
     msg_fail: "Assets depleted early",
-    
-    // AI
-    ai_welcome: "I've analyzed your custom plan. I can see your specific assets and debt strategies. How can I help?",
-    ai_placeholder: "Ask about your car loan or inflation impact...",
+
+    // AI Advisor
+    ai_welcome: "Hello! I am your AI financial assistant. I can analyze your plan and offer advice. What's on your mind?",
+    ai_placeholder: "Ask a question about your finances...",
   },
   th: {
     app_title: "RetirePlan",
     dashboard: "ภาพรวม",
     inputs: "ข้อมูลนำเข้า",
-    advisor: "ที่ปรึกษา AI",
     export: "ส่งออก",
     import: "นำเข้า",
     
@@ -67,6 +76,8 @@ const resources = {
     section_profile: "ข้อมูลส่วนตัว & เงินเฟ้อ",
     age_current: "อายุปัจจุบัน",
     age_retire: "อายุเกษียณ",
+    age_max: "อายุขัยคาดการณ์",
+    lbl_currency: "สกุลเงิน",
     inf_gen: "เงินเฟ้อทั่วไป (%)",
     inf_med: "เงินเฟ้อค่ารักษาพยาบาล (%)",
     
@@ -88,24 +99,33 @@ const resources = {
     
     lbl_monthly: "ต่อเดือน",
     lbl_yearly: "ต่อปี",
+    lbl_debt_payments: "การจ่ายหนี้",
+    lbl_investments: "เงินลงทุน",
     
     btn_add: "+ เพิ่มรายการ",
     btn_remove: "ลบ",
+    
+    note_priority: "ลำดับมีผลต่อการลงทุน (บนลงล่าง) หากสภาพคล่องไม่พอ รายการด้านล่างอาจไม่ถูกลงทุน ลากเพื่อจัดลำดับใหม่",
+    
+    warn_deficit_title: "รายจ่ายเกินรายรับ",
+    warn_deficit_msg: "ยอดรวมรายจ่าย (ค่าใช้จ่าย+ลงทุน+หนี้) เกินรายรับอยู่ {amount}/เดือน เงินเก็บจะหมดลงอย่างรวดเร็ว",
 
     // Dashboard
     chart_wealth: "แนวโน้มความมั่งคั่ง",
+    chart_income: "วิเคราะห์รายได้",
+    chart_outflow: "วิเคราะห์รายจ่าย",
+    chart_cashflow: "กระแสเงินสดสุทธิต่อปี",
     chart_assets_detail: "การเติบโตของทรัพย์สิน",
     chart_debts_detail: "การลดลงของหนี้สิน",
-    chart_breakdown: "สัดส่วนทรัพย์สิน",
     chart_expense: "สัดส่วนรายจ่าย",
     stat_nw: "ความมั่งคั่ง ณ เกษียณ",
     stat_sus: "ความยั่งยืนของแผน",
-    msg_sus: "เงินพอใช้ถึงอายุ 95+",
+    msg_sus: "เงินพอใช้ตลอดแผน",
     msg_fail: "เงินหมดก่อนกำหนด",
-    
-    // AI
-    ai_welcome: "ฉันวิเคราะห์ข้อมูลการเงินของคุณแล้ว ฉันช่วยวางแผนเรื่องหนี้สินหรือการรับมือเงินเฟ้อได้นะ",
-    ai_placeholder: "ถามเกี่ยวกับหนี้บ้าน หรือผลกระทบเงินเฟ้อ...",
+
+    // AI Advisor
+    ai_welcome: "สวัสดีครับ! ผมคือผู้ช่วยทางการเงิน AI ของคุณ ผมสามารถวิเคราะห์แผนและให้คำแนะนำได้ มีอะไรให้ช่วยไหมครับ?",
+    ai_placeholder: "ถามคำถามเกี่ยวกับการเงินของคุณ...",
   }
 };
 

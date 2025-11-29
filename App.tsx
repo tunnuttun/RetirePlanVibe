@@ -1,15 +1,14 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { InputForm } from './components/InputForm';
-import { AIAdvisor } from './components/AIAdvisor';
 import { FinancialPlan, DEFAULT_PLAN, ViewState, Language } from './types';
 import { t } from './utils/locales';
 
 // Icons
 const ChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>;
 const SlidersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>;
-const MessageIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>;
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
 const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>;
 
@@ -52,18 +51,67 @@ function App() {
     reader.onload = (e) => {
       try {
         const json = JSON.parse(e.target?.result as string);
-        if (json.assets && json.debts) {
-          setPlan(json);
-          alert("Plan loaded successfully!");
+        
+        const missingFields: string[] = [];
+        // Start with DEFAULT_PLAN to ensure valid structure and types. 
+        // We will overwrite this with data found in the JSON.
+        const safePlan: FinancialPlan = { ...DEFAULT_PLAN }; 
+
+        // Helper to safely assign fields from JSON if they exist and match type
+        const processField = <K extends keyof FinancialPlan>(key: K, type: 'number' | 'object' | 'array' | 'string') => {
+           if (json[key] === undefined) {
+             missingFields.push(key);
+             // We keep the value from DEFAULT_PLAN
+           } else {
+             if (type === 'array') {
+                if (Array.isArray(json[key])) {
+                    safePlan[key] = json[key] as any;
+                } else {
+                    missingFields.push(`${key} (expected array)`);
+                }
+             } else if (type === 'object') {
+                // For objects like 'inflation', we merge to preserve default sub-keys if missing
+                if (typeof json[key] === 'object' && json[key] !== null && !Array.isArray(json[key])) {
+                    safePlan[key] = { ...(safePlan[key] as any), ...json[key] };
+                } else {
+                    missingFields.push(`${key} (expected object)`);
+                }
+             } else {
+                if (typeof json[key] === type) {
+                    safePlan[key] = json[key];
+                } else {
+                    missingFields.push(`${key} (expected ${type})`);
+                }
+             }
+           }
+        };
+
+        // Validate and map specific fields, ignoring any extra junk in the JSON
+        processField('currentAge', 'number');
+        processField('retirementAge', 'number');
+        processField('maxAge', 'number');
+        processField('currency', 'string');
+        processField('inflation', 'object');
+        processField('assets', 'array');
+        processField('debts', 'array');
+        processField('incomes', 'array');
+        processField('expenses', 'array');
+        processField('debtPayments', 'array');
+
+        setPlan(safePlan);
+
+        if (missingFields.length > 0) {
+            alert(`Import completed with warnings.\n\nThe following fields were missing or invalid and have been reset to defaults:\n- ${missingFields.join('\n- ')}`);
         } else {
-          alert("Invalid file format.");
+            alert("Plan loaded successfully!");
         }
       } catch (err) {
-        alert("Error reading file.");
+        console.error("Import Error:", err);
+        alert("Error reading file. Please ensure it is a valid JSON file.");
       }
     };
     reader.readAsText(file);
-    event.target.value = '';
+    event.target.value = ''; // Reset input to allow re-importing the same file
   };
 
   return (
@@ -117,7 +165,6 @@ function App() {
       <main className="flex-1 p-4 md:p-6 overflow-hidden">
         {currentView === ViewState.DASHBOARD && <Dashboard plan={plan} lang={lang} />}
         {currentView === ViewState.INPUTS && <InputForm plan={plan} onChange={setPlan} lang={lang} />}
-        {currentView === ViewState.ADVISOR && <AIAdvisor plan={plan} lang={lang} />}
       </main>
 
       {/* Mobile Nav */}
@@ -141,16 +188,6 @@ function App() {
           >
             <SlidersIcon />
             <span className="text-xs font-medium mt-1">{t('inputs', lang)}</span>
-          </button>
-
-          <button 
-            onClick={() => setCurrentView(ViewState.ADVISOR)}
-            className={`flex flex-col items-center p-2 rounded-xl flex-1 transition-all ${
-              currentView === ViewState.ADVISOR ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <MessageIcon />
-            <span className="text-xs font-medium mt-1">{t('advisor', lang)}</span>
           </button>
         </div>
         
