@@ -46,9 +46,11 @@ function App() {
 
   const handleExport = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(plan));
+    const name = plan.planName.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '');
+    const filename = name.toLowerCase().endsWith('.json') ? name : `${name || 'financial_plan'}.json`;
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `retirement_plan_${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchorNode.setAttribute("download", filename);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
@@ -61,7 +63,8 @@ function App() {
     const request = ++importRequest.current;
 
     try {
-      const imported = readPlan(JSON.parse(await file.text()));
+      const fallbackName = file.name.replace(/\.json$/i, '').trim() || DEFAULT_PLAN.planName;
+      const imported = readPlan(JSON.parse(await file.text()), fallbackName);
       if (request !== importRequest.current) return;
       setPlan(imported.plan);
       alert(imported.warnings.length

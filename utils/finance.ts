@@ -29,8 +29,10 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
 
   // 1. Initialize State Vectors
   // Deep copy initial states to avoid mutating the plan
-  const currentAssets = plan.assets.map(a => ({ ...a, accumulatedValue: a.value }));
+  const currentAssets = plan.assets.map(a => ({ ...a, accumulatedValue: a.value, sold: false }));
   const currentDebts = plan.debts.map(d => ({ ...d, remainingBalance: d.value }));
+  const inflationRates = new Map(plan.inflation.map(category => [category.id, category.value]));
+  const defaultInflationRate = plan.inflation[0]?.value ?? 0;
 
   const cashAsset = currentAssets[getCashAssetIndex(plan.assets)];
   let cashBalance = cashAsset?.accumulatedValue ?? 0;
@@ -59,14 +61,17 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
 
     // --- B. EXPENSES ---
     let yearlyExpenses = 0;
+    const expenseBreakdown: Record<string, number> = Object.create(null);
+    plan.expenses.forEach(exp => expenseBreakdown[exp.name] = 0);
     plan.expenses.forEach(exp => {
       if (isCashFlowActive(exp, age, maxAge)) {
         const yearsActive = age - plan.currentAge;
-        const inflationRate = exp.type === 'medical' ? plan.inflation.medical : plan.inflation.general;
+        const inflationRate = inflationRates.get(exp.type ?? '') ?? defaultInflationRate;
         const inflationMultiplier = Math.pow(1 + (inflationRate / 100), yearsActive);
         let amount = exp.value * inflationMultiplier;
         if (exp.frequency === 'monthly') amount *= 12;
         yearlyExpenses += amount;
+        expenseBreakdown[exp.name] += amount;
       }
     });
 
@@ -77,6 +82,14 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
       }
     });
     cashBalance = cashAsset?.accumulatedValue ?? cashBalance;
+
+    // A sale transfers the grown balance to cash before this year's spending.
+    for (const asset of currentAssets) {
+      if (asset === cashAsset || !asset.sellAge || asset.sellAge !== age) continue;
+      cashBalance += asset.accumulatedValue;
+      asset.accumulatedValue = 0;
+      asset.sold = true;
+    }
 
     // --- D. DEBT GROWTH & MANDATORY PAYMENTS ---
     let totalDebtPaid = 0;
@@ -118,8 +131,7 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
 
     // Iterate through assets in the order defined by the user (Priority based on index)
     currentAssets.forEach(asset => {
-      // Skip the cash wallet itself (we don't "invest" in cash, it catches the overflow)
-      if (asset === cashAsset) return;
+      if (asset === cashAsset || asset.sold) return;
 
       const start = asset.contributionStartAge;
       const end = asset.contributionEndAge || maxAge;
@@ -185,7 +197,8 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
       isRetired,
       assetBreakdown,
       debtBreakdown,
-      incomeBreakdown
+      incomeBreakdown,
+      expenseBreakdown,
     });
   }
 

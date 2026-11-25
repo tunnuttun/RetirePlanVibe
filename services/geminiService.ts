@@ -29,8 +29,7 @@ export const generateFinancialAdvice = async (
     - Retirement Age: ${plan.retirementAge}
     - Life Expectancy / Max Age: ${plan.maxAge}
     - Currency: ${plan.currency}
-    - General Inflation: ${plan.inflation.general}%
-    - Medical Inflation: ${plan.inflation.medical}%
+    - Inflation categories: ${plan.inflation.map(category => `${category.name}: ${category.value}%`).join(', ')}
     
     Assets & Contributions:
     ${assetSummary}

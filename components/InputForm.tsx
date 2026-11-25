@@ -34,13 +34,13 @@ const Section = ({ title, children, className = "" }: { title: string, children?
   </div>
 );
 
-type InputProps = { label: string; className?: string; placeholder?: string } & (
+type InputProps = { label: string; className?: string; placeholder?: string; title?: string } & (
   | { type: 'text'; value: string; onChange: (value: string) => void }
-  | { type?: 'number'; value: number | ''; onChange: (value: number) => void; limits?: NumberLimits; optional?: boolean }
+  | { type?: 'number'; value: number | ''; onChange: (value: number) => void; limits?: NumberLimits; optional?: boolean; commitOnBlur?: boolean }
 );
 
 const Input = (props: InputProps) => {
-  const { label, value, className = '', placeholder } = props;
+  const { label, value, className = '', placeholder, title } = props;
   const inputId = useId();
   const [localValue, setLocalValue] = useState(String(value));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +61,7 @@ const Input = (props: InputProps) => {
 
     if (props.type === 'text') {
       props.onChange(rawValue);
-    } else if (rawValue.trim() && isAllowedNumber(Number(rawValue), limits)) {
+    } else if (!props.commitOnBlur && rawValue.trim() && isAllowedNumber(Number(rawValue), limits)) {
       props.onChange(Number(rawValue));
     }
   };
@@ -75,6 +75,9 @@ const Input = (props: InputProps) => {
     } else if (numberValue === undefined && limits === AMOUNT_LIMITS) {
       props.onChange(0);
       setLocalValue('0');
+    } else if (props.commitOnBlur && isAllowedNumber(numberValue, limits)) {
+      props.onChange(numberValue);
+      setLocalValue(String(numberValue));
     } else {
       setLocalValue(String(value));
     }
@@ -95,9 +98,13 @@ const Input = (props: InputProps) => {
         aria-invalid={invalid || undefined}
         value={localValue}
         placeholder={placeholder}
+        title={title}
         onChange={handleChange}
         onBlur={handleBlur}
         onFocus={handleFocus}
+        onKeyDown={event => {
+          if (props.type !== 'text' && props.commitOnBlur && event.key === 'Enter') event.currentTarget.blur();
+        }}
         className="w-full p-2 bg-slate-50 border border-slate-200 aria-[invalid=true]:border-red-500 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors"
       />
     </div>
@@ -134,13 +141,34 @@ function Select<T extends string>({ label, value, onChange, options, className =
 export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) => {
   const [draggedItem, setDraggedItem] = useState<{ listKey: keyof FinancialPlan, index: number } | null>(null);
   const cashAssetIndex = getCashAssetIndex(plan.assets);
+  const inflationOptions = plan.inflation.map(category => ({ value: category.id, label: category.name }));
   
   const updatePlan = (key: keyof FinancialPlan, value: any) => {
     onChange({ ...plan, [key]: value });
   };
 
-  const updateInflation = (key: 'general' | 'medical', val: number) => {
-    onChange({ ...plan, inflation: { ...plan.inflation, [key]: val } });
+  const updateCurrentAge = (currentAge: number) => {
+    if (currentAge === plan.currentAge) return;
+    onChange({
+      ...plan,
+      currentAge,
+      maxAge: Math.max(plan.maxAge, currentAge),
+      assets: plan.assets.map(item => item.contributionStartAge === plan.currentAge ? { ...item, contributionStartAge: currentAge } : item),
+      incomes: plan.incomes.map(item => item.startAge === plan.currentAge ? { ...item, startAge: currentAge } : item),
+      expenses: plan.expenses.map(item => item.startAge === plan.currentAge ? { ...item, startAge: currentAge } : item),
+    });
+  };
+
+  const updateRetirementAge = (retirementAge: number) => {
+    if (retirementAge === plan.retirementAge) return;
+    const followsRetirement = (endAge?: number) => Boolean(endAge) && endAge === plan.retirementAge;
+    onChange({
+      ...plan,
+      retirementAge,
+      assets: plan.assets.map(item => followsRetirement(item.contributionEndAge) ? { ...item, contributionEndAge: retirementAge } : item),
+      incomes: plan.incomes.map(item => followsRetirement(item.endAge) ? { ...item, endAge: retirementAge } : item),
+      expenses: plan.expenses.map(item => followsRetirement(item.endAge) ? { ...item, endAge: retirementAge } : item),
+    });
   };
 
   const updateItem = (listKey: keyof FinancialPlan, id: string, field: string, val: any) => {
@@ -172,6 +200,10 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
     let updatedPlan = { ...plan, [listKey]: list };
     if (listKey === 'debts') {
       updatedPlan.debtPayments = updatedPlan.debtPayments.filter(p => p.debtId !== id);
+    }
+    if (listKey === 'inflation') {
+      const fallback = updatedPlan.inflation[0]?.id;
+      updatedPlan.expenses = updatedPlan.expenses.map(expense => expense.type === id ? { ...expense, type: fallback } : expense);
     }
     onChange(updatedPlan);
   };
@@ -230,12 +262,11 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
         </div>
       )}
 
-      {/* 1. Profile & Inflation */}
       <Section title={t('section_profile', lang)}>
+        <Input label={t('lbl_plan_name', lang)} type="text" value={plan.planName} placeholder={t('plan_name_placeholder', lang)} onChange={name => updatePlan('planName', name)} />
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Input label={t('age_current', lang)} value={plan.currentAge} limits={AGE_LIMITS}
-            onChange={currentAge => onChange({ ...plan, currentAge, maxAge: Math.max(plan.maxAge, currentAge) })} />
-          <Input label={t('age_retire', lang)} value={plan.retirementAge} limits={AGE_LIMITS} onChange={v => updatePlan('retirementAge', v)} />
+          <Input label={t('age_current', lang)} value={plan.currentAge} limits={AGE_LIMITS} commitOnBlur onChange={updateCurrentAge} />
+          <Input label={t('age_retire', lang)} value={plan.retirementAge} limits={AGE_LIMITS} commitOnBlur onChange={updateRetirementAge} />
           <Input label={t('age_max', lang)} value={plan.maxAge} limits={{ ...AGE_LIMITS, min: plan.currentAge }} onChange={v => updatePlan('maxAge', v)} />
           <Select 
             label={t('lbl_currency', lang)} 
@@ -244,10 +275,36 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
             onChange={(v: string) => updatePlan('currency', v)} 
           />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-slate-50">
-          <Input label={t('inf_gen', lang)} value={plan.inflation.general} limits={RATE_LIMITS} onChange={v => updateInflation('general', v)} />
-          <Input label={t('inf_med', lang)} value={plan.inflation.medical} limits={RATE_LIMITS} onChange={v => updateInflation('medical', v)} />
+      </Section>
+
+      <Section title={t('section_inflation', lang)}>
+        <p className="text-xs text-slate-500">{t('note_inflation', lang)}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {plan.inflation.map((category, index) => (
+            <div key={category.id} draggable
+              onDragStart={event => handleDragStart(event, 'inflation', index)}
+              onDragOver={handleDragOver}
+              onDrop={event => handleDrop(event, 'inflation', index)}
+              onDragEnd={() => setDraggedItem(null)}
+              className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 p-2"
+            >
+              <GripIcon />
+              <div className="flex-1 grid grid-cols-3 gap-2">
+                <Input className="col-span-2" label={t('col_category_name', lang)} type="text" value={category.name}
+                  onChange={name => updateItem('inflation', category.id, 'name', name)} />
+                <Input label={t('col_inflation_rate', lang)} value={category.value} limits={RATE_LIMITS}
+                  onChange={rate => updateItem('inflation', category.id, 'value', rate)} />
+              </div>
+              <button type="button" onClick={() => removeItem('inflation', category.id)} disabled={plan.inflation.length === 1}
+                aria-label={`${t('btn_remove', lang)} ${category.name}`}
+                className="p-1 text-slate-400 hover:text-red-600 disabled:opacity-40"
+              >×</button>
+            </div>
+          ))}
         </div>
+        <button type="button" onClick={() => addItem('inflation', { id: `inf_${crypto.randomUUID()}`, name: t('inflation_new', lang), value: 3 })}
+          className="text-sm font-medium text-blue-600 hover:underline"
+        >{t('btn_add_inflation', lang)}</button>
       </Section>
 
       {/* 2. Assets & Investments */}
@@ -292,9 +349,11 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                         <>
                           <Input className="col-span-4 md:col-span-2" label={t('col_amt', lang)} value={item.contributionAmount} onChange={(v: number) => updateItem('assets', item.id, 'contributionAmount', v)} />
                           <Select className="col-span-4 md:col-span-2" label={t('col_freq', lang)} value={item.contributionFrequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('assets', item.id, 'contributionFrequency', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_start', lang)} value={item.contributionStartAge} limits={AGE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionStartAge', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_end', lang)} value={item.contributionEndAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('assets', item.id, 'contributionEndAge', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} limits={RATE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
+                          <Input className="col-span-4 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} limits={RATE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
+                          <Input className="col-span-4 md:col-span-1" label={t('col_start', lang)} value={item.contributionStartAge} limits={AGE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionStartAge', v)} />
+                          <Input className="col-span-4 md:col-span-1" label={t('col_end', lang)} value={item.contributionEndAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('assets', item.id, 'contributionEndAge', v)} />
+                          <Input className="col-span-4 md:col-span-2" label={t('col_sell_age', lang)} value={item.sellAge || ''} limits={AGE_LIMITS} optional
+                            title={t('tip_sell_age', lang)} onChange={v => updateItem('assets', item.id, 'sellAge', v)} />
                         </>
                       )}
                     </div>
@@ -365,13 +424,13 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
           >
              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
              <div className="flex-1 grid grid-cols-12 gap-2 items-end">
-               <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('incomes', item.id, 'name', v)} />
-               <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('incomes', item.id, 'value', v)} />
-               <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('incomes', item.id, 'frequency', v)} />
-               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('incomes', item.id, 'startAge', v)} />
-               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.retirementAge.toString()} onChange={v => updateItem('incomes', item.id, 'endAge', v)} />
-               <Input className="col-span-2" label={t('col_inc', lang)} value={item.growthRate} limits={RATE_LIMITS} onChange={v => updateItem('incomes', item.id, 'growthRate', v)} />
-               <button onClick={() => removeItem('incomes', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+               <Input className="col-span-6 md:col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('incomes', item.id, 'name', v)} />
+               <Input className="col-span-3 md:col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('incomes', item.id, 'value', v)} />
+               <Select className="col-span-3 md:col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('incomes', item.id, 'frequency', v)} />
+               <Input className="col-span-3 md:col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('incomes', item.id, 'startAge', v)} />
+               <Input className="col-span-3 md:col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.retirementAge.toString()} onChange={v => updateItem('incomes', item.id, 'endAge', v)} />
+               <Input className="col-span-3 md:col-span-2" label={t('col_inc', lang)} value={item.growthRate} limits={RATE_LIMITS} onChange={v => updateItem('incomes', item.id, 'growthRate', v)} />
+               <button onClick={() => removeItem('incomes', item.id)} className="col-span-3 md:col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
              </div>
           </div>
         ))}
@@ -398,19 +457,22 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
           >
             <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
             <div className="flex-1 grid grid-cols-12 gap-2 items-end">
-               <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('expenses', item.id, 'name', v)} />
-               <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('expenses', item.id, 'value', v)} />
-               <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('expenses', item.id, 'frequency', v)} />
-               <Select className="col-span-2" label="Type" value={item.type || 'general'} options={[{value: 'general', label: 'Gen'}, {value: 'medical', label: 'Med'}]} onChange={(v: string) => updateItem('expenses', item.id, 'type', v)} />
-               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('expenses', item.id, 'startAge', v)} />
-               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('expenses', item.id, 'endAge', v)} />
-               <button onClick={() => removeItem('expenses', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+               <Input className="col-span-6 md:col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('expenses', item.id, 'name', v)} />
+               <Input className="col-span-3 md:col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('expenses', item.id, 'value', v)} />
+               <Select className="col-span-3 md:col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('expenses', item.id, 'frequency', v)} />
+               <Select className="col-span-4 md:col-span-2" label={t('lbl_expense_inflation', lang)}
+                 value={inflationOptions.find(option => option.value === item.type)?.value ?? inflationOptions[0]?.value ?? ''}
+                 options={inflationOptions.length ? inflationOptions : [{ value: '', label: t('inflation_none', lang) }]}
+                 onChange={v => updateItem('expenses', item.id, 'type', v)} />
+               <Input className="col-span-3 md:col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('expenses', item.id, 'startAge', v)} />
+               <Input className="col-span-3 md:col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('expenses', item.id, 'endAge', v)} />
+               <button onClick={() => removeItem('expenses', item.id)} className="col-span-2 md:col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
             </div>
           </div>
         ))}
         {plan.expenses.length < 30 && (
           <button 
-             onClick={() => addItem('expenses', { id: Date.now().toString(), name: 'General', value: 0, interestRate: 0, frequency: 'monthly', startAge: plan.currentAge, type: 'general', growthRate: 0 })}
+             onClick={() => addItem('expenses', { id: Date.now().toString(), name: 'General', value: 0, interestRate: 0, frequency: 'monthly', startAge: plan.currentAge, type: plan.inflation[0]?.id, growthRate: 0 })}
              className="text-sm text-blue-600 font-medium hover:underline"
           >
             {t('btn_add', lang)}
@@ -435,17 +497,17 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"><GripIcon /></div>
                <div className="flex-1 grid grid-cols-12 gap-2 items-end">
                   <Select 
-                   className="col-span-3" 
+                   className="col-span-6 md:col-span-3"
                    label="Loan" 
                    value={item.debtId} 
                    options={plan.debts.map(debt => ({ value: debt.id, label: debt.name }))}
                    onChange={(v: string) => updateItem('debtPayments', item.id, 'debtId', v)} 
                  />
-                 <Input className="col-span-2" label={t('col_amt', lang)} value={item.amount} onChange={(v: number) => updateItem('debtPayments', item.id, 'amount', v)} />
-                 <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('debtPayments', item.id, 'frequency', v)} />
-                 <Input className="col-span-2" label="Extra/Yr" value={item.extraYearlyAmount} onChange={(v: number) => updateItem('debtPayments', item.id, 'extraYearlyAmount', v)} />
-                 <Input className="col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} limits={RATE_LIMITS} onChange={v => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
-                 <button onClick={() => removeItem('debtPayments', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
+                 <Input className="col-span-3 md:col-span-2" label={t('col_amt', lang)} value={item.amount} onChange={(v: number) => updateItem('debtPayments', item.id, 'amount', v)} />
+                 <Select className="col-span-3 md:col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('debtPayments', item.id, 'frequency', v)} />
+                 <Input className="col-span-4 md:col-span-2" label="Extra/Yr" value={item.extraYearlyAmount} onChange={(v: number) => updateItem('debtPayments', item.id, 'extraYearlyAmount', v)} />
+                 <Input className="col-span-4 md:col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} limits={RATE_LIMITS} onChange={v => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
+                 <button onClick={() => removeItem('debtPayments', item.id)} className="col-span-4 md:col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
                </div>
             </div>
         ))}

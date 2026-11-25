@@ -4,10 +4,15 @@ export enum ViewState {
   INPUTS = 'INPUTS',
 }
 
-export type InflationType = 'general' | 'medical';
 export type Frequency = 'monthly' | 'yearly';
 export type Language = 'en' | 'th';
 export type CurrencyCode = 'USD' | 'THB';
+
+export interface InflationCategory {
+  id: string;
+  name: string;
+  value: number; // Annual inflation rate as a percentage
+}
 
 export interface BaseItem {
   id: string;
@@ -23,6 +28,7 @@ export interface AssetItem extends BaseItem {
   contributionStartAge: number;
   contributionEndAge?: number;
   contributionGrowthRate: number; // % yearly increase of the contribution amount
+  sellAge?: number;
 }
 
 export interface CashFlowItem extends BaseItem {
@@ -30,7 +36,7 @@ export interface CashFlowItem extends BaseItem {
   startAge: number;
   endAge?: number; 
   growthRate: number; 
-  type?: InflationType; 
+  type?: string; // Inflation category ID for expenses
 }
 
 export interface DebtItem extends BaseItem {
@@ -47,14 +53,12 @@ export interface PayoffStrategy {
 }
 
 export interface FinancialPlan {
+  planName: string;
   currentAge: number;
   retirementAge: number;
   maxAge: number;
   currency: CurrencyCode;
-  inflation: {
-    general: number;
-    medical: number;
-  };
+  inflation: InflationCategory[];
   assets: AssetItem[];
   debts: DebtItem[];
   incomes: CashFlowItem[];
@@ -78,6 +82,7 @@ export interface SimulationResult {
   assetBreakdown: Record<string, number>; 
   debtBreakdown: Record<string, number>;
   incomeBreakdown: Record<string, number>;
+  expenseBreakdown: Record<string, number>;
 }
 
 export interface ChatMessage {
@@ -87,14 +92,16 @@ export interface ChatMessage {
 }
 
 export const DEFAULT_PLAN: FinancialPlan = {
+  planName: 'My Financial Plan',
   currentAge: 30,
   retirementAge: 60,
   maxAge: 90,
   currency: 'USD',
-  inflation: {
-    general: 3.0,
-    medical: 5.0,
-  },
+  inflation: [
+    { id: 'inf_gen', name: 'General', value: 3 },
+    { id: 'inf_med', name: 'Medical', value: 5 },
+    { id: 'inf_edu', name: 'Education', value: 4 },
+  ],
   assets: [
     { 
       id: 'a1', name: 'Cash', value: 50000, interestRate: 0.5,
@@ -125,11 +132,11 @@ export const DEFAULT_PLAN: FinancialPlan = {
     { id: 'inc1', name: 'Salary', value: 4000, interestRate: 0, frequency: 'monthly', startAge: 30, endAge: 60, growthRate: 3 },
   ],
   expenses: [
-    { id: 'exp1', name: 'Food', value: 400, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'general' },
-    { id: 'exp2', name: 'Transportation', value: 150, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'general' },
-    { id: 'exp3', name: 'Utilities', value: 100, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'general' },
-    { id: 'exp4', name: 'Tax', value: 5000, interestRate: 0, frequency: 'yearly', startAge: 30, growthRate: 0, type: 'general' },
-    { id: 'exp5', name: 'Travels', value: 2000, interestRate: 0, frequency: 'yearly', startAge: 30, growthRate: 0, type: 'general' },
+    { id: 'exp1', name: 'Food', value: 400, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'inf_gen' },
+    { id: 'exp2', name: 'Transportation', value: 150, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'inf_gen' },
+    { id: 'exp3', name: 'Utilities', value: 100, interestRate: 0, frequency: 'monthly', startAge: 30, growthRate: 0, type: 'inf_gen' },
+    { id: 'exp4', name: 'Tax', value: 5000, interestRate: 0, frequency: 'yearly', startAge: 30, growthRate: 0, type: 'inf_gen' },
+    { id: 'exp5', name: 'Travels', value: 2000, interestRate: 0, frequency: 'yearly', startAge: 30, growthRate: 0, type: 'inf_gen' },
   ],
   debtPayments: [
     { id: 'pay1', debtId: 'd1', frequency: 'monthly', amount: 900, extraYearlyAmount: 0, yearlyIncrement: 0 },

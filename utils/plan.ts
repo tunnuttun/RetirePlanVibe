@@ -1,4 +1,4 @@
-import { BaseItem, DEFAULT_PLAN, FinancialPlan, Frequency, InflationType } from '../types';
+import { BaseItem, DEFAULT_PLAN, FinancialPlan, Frequency } from '../types';
 
 export interface NumberLimits {
   min: number;
@@ -20,7 +20,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function readPlan(input: unknown): { plan: FinancialPlan; warnings: string[] } {
+export function readPlan(input: unknown, fallbackName = DEFAULT_PLAN.planName): { plan: FinancialPlan; warnings: string[] } {
   if (!isRecord(input)) throw new TypeError('Expected a retirement plan object');
 
   const value = input;
@@ -32,7 +32,7 @@ export function readPlan(input: unknown): { plan: FinancialPlan; warnings: strin
     return fallback;
   }
 
-  function endAge(input: unknown, field: string) {
+  function optionalAge(input: unknown, field: string) {
     if (input == null || input === 0) return undefined;
     if (isAllowedNumber(input, AGE_LIMITS)) return input;
     warnings.add(field);
@@ -87,12 +87,35 @@ export function readPlan(input: unknown): { plan: FinancialPlan; warnings: strin
   const maxAge = readNumber(value.maxAge, Math.max(DEFAULT_PLAN.maxAge, currentAge), { ...AGE_LIMITS, min: currentAge }, 'maxAge');
   const currency = value.currency === 'THB' || value.currency === 'USD' ? value.currency : DEFAULT_PLAN.currency;
   if (currency !== value.currency) warnings.add('currency');
+  const planName = typeof value.planName === 'string' && value.planName.trim() ? value.planName : fallbackName;
+  if (value.planName != null && typeof value.planName !== 'string') warnings.add('planName');
 
-  const savedInflation = isRecord(value.inflation) ? value.inflation : {};
-  const inflation = {
-    general: readNumber(savedInflation.general, DEFAULT_PLAN.inflation.general, RATE_LIMITS, 'inflation.general'),
-    medical: readNumber(savedInflation.medical, DEFAULT_PLAN.inflation.medical, RATE_LIMITS, 'inflation.medical'),
-  };
+  const legacyCategoryIds = new Map([['general', 'inf_gen'], ['medical', 'inf_med']]);
+  const inflation = isRecord(value.inflation)
+    ? readLegacyInflation(value.inflation)
+    : readList('inflation', DEFAULT_PLAN.inflation, input => {
+      if (typeof input.id !== 'string' || !input.id || typeof input.name !== 'string') return;
+      return { id: input.id, name: input.name, value: readNumber(input.value, 0, RATE_LIMITS, 'inflation') };
+    });
+
+  function readLegacyInflation(input: Record<string, unknown>) {
+    return DEFAULT_PLAN.inflation.flatMap(category => {
+      const field = category.id === 'inf_gen' ? 'general' : category.id === 'inf_med' ? 'medical' : undefined;
+      if (!field) return [];
+      return [{ ...category, value: readNumber(input[field], category.value, RATE_LIMITS, `inflation.${field}`) }];
+    });
+  }
+
+  const inflationIds = new Set(inflation.map(category => category.id));
+  function readExpenseCategory(input: unknown) {
+    if (typeof input === 'string') {
+      if (inflationIds.has(input)) return input;
+      const legacyId = legacyCategoryIds.get(input);
+      if (legacyId && inflationIds.has(legacyId)) return legacyId;
+    }
+    if (input != null && input !== '' && inflation.length > 0) warnings.add('expenses');
+    return inflation[0]?.id;
+  }
 
   const assets = readList('assets', DEFAULT_PLAN.assets, input => {
     const base = readBaseItem(input, 'assets');
@@ -102,8 +125,9 @@ export function readPlan(input: unknown): { plan: FinancialPlan; warnings: strin
       contributionAmount: readNumber(input.contributionAmount, 0, AMOUNT_LIMITS, 'assets'),
       contributionFrequency: frequency(input.contributionFrequency, 'assets'),
       contributionStartAge: readNumber(input.contributionStartAge, currentAge, AGE_LIMITS, 'assets'),
-      contributionEndAge: endAge(input.contributionEndAge, 'assets'),
+      contributionEndAge: optionalAge(input.contributionEndAge, 'assets'),
       contributionGrowthRate: readNumber(input.contributionGrowthRate, 0, RATE_LIMITS, 'assets'),
+      sellAge: optionalAge(input.sellAge, 'assets'),
     };
   });
   const debts = readList('debts', DEFAULT_PLAN.debts, input => readBaseItem(input, 'debts'));
@@ -112,15 +136,13 @@ export function readPlan(input: unknown): { plan: FinancialPlan; warnings: strin
     return readList(key, DEFAULT_PLAN[key], input => {
       const base = readBaseItem(input, key);
       if (!base) return;
-      const type: InflationType | undefined = input.type === 'medical' || input.type === 'general' ? input.type : undefined;
-      if (input.type != null && type === undefined) warnings.add(key);
       return {
         ...base,
         frequency: frequency(input.frequency, key),
         startAge: readNumber(input.startAge, currentAge, AGE_LIMITS, key),
-        endAge: endAge(input.endAge, key),
+        endAge: optionalAge(input.endAge, key),
         growthRate: readNumber(input.growthRate, 0, RATE_LIMITS, key),
-        type,
+        type: key === 'expenses' ? readExpenseCategory(input.type) : undefined,
       };
     });
   }
@@ -139,7 +161,7 @@ export function readPlan(input: unknown): { plan: FinancialPlan; warnings: strin
   });
 
   return {
-    plan: { currentAge, retirementAge, maxAge, currency, inflation, assets, debts, incomes: readCashFlows('incomes'), expenses: readCashFlows('expenses'), debtPayments },
+    plan: { planName, currentAge, retirementAge, maxAge, currency, inflation, assets, debts, incomes: readCashFlows('incomes'), expenses: readCashFlows('expenses'), debtPayments },
     warnings: [...warnings],
   };
 }
