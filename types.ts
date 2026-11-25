@@ -72,7 +72,8 @@ export interface SimulationResult {
   totalExpenses: number;
   totalInvestments: number;
   totalDebtPayments: number;
-  liquidCash: number; 
+  liquidCash: number;
+  cashBalance: number;
   isRetired: boolean;
   assetBreakdown: Record<string, number>; 
   debtBreakdown: Record<string, number>;

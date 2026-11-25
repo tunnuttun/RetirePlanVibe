@@ -1,6 +1,6 @@
 
 
-import { FinancialPlan, SimulationResult } from '../types';
+import { CashFlowItem, FinancialPlan, SimulationResult } from '../types';
 
 // Helper to identify illiquid assets that shouldn't be automatically sold for expenses
 const isIlliquid = (name: string): boolean => {
@@ -11,39 +11,43 @@ const isIlliquid = (name: string): boolean => {
          n.includes('car') || n.includes('vehicle');
 };
 
+export function getCashAssetIndex(assets: FinancialPlan['assets']) {
+  return assets.findIndex(asset => {
+    const name = asset.name.toLowerCase();
+    return name.includes('cash') || name.includes('saving');
+  });
+}
+
+export function isCashFlowActive(item: CashFlowItem, age: number, defaultEndAge: number) {
+  return age >= item.startAge && age <= (item.endAge || defaultEndAge);
+}
+
 export const calculateProjections = (plan: FinancialPlan): SimulationResult[] => {
   const currentYear = new Date().getFullYear();
   const results: SimulationResult[] = [];
-  const MAX_AGE = plan.maxAge || 95;
+  const maxAge = plan.maxAge;
 
   // 1. Initialize State Vectors
   // Deep copy initial states to avoid mutating the plan
-  let currentAssets = plan.assets.map(a => ({ ...a, accumulatedValue: a.value }));
-  let currentDebts = plan.debts.map(d => ({ ...d, remainingBalance: d.value }));
-  
-  // Find the index of the "Cash" asset to absorb surplus/deficit
-  // If no "Cash" found, we use the first asset, or create a virtual wallet if assets is empty
-  let cashAssetIndex = currentAssets.findIndex(a => 
-    a.name.toLowerCase().includes('cash') || a.name.toLowerCase().includes('saving')
-  );
-  if (cashAssetIndex === -1 && currentAssets.length > 0) cashAssetIndex = 0;
+  const currentAssets = plan.assets.map(a => ({ ...a, accumulatedValue: a.value }));
+  const currentDebts = plan.debts.map(d => ({ ...d, remainingBalance: d.value }));
 
-  for (let age = plan.currentAge; age <= MAX_AGE; age++) {
+  const cashAsset = currentAssets[getCashAssetIndex(plan.assets)];
+  let cashBalance = cashAsset?.accumulatedValue ?? 0;
+
+  for (let age = plan.currentAge; age <= maxAge; age++) {
     const year = currentYear + (age - plan.currentAge);
     const isRetired = age >= plan.retirementAge;
 
     // --- A. INCOME ---
     let yearlyIncome = 0;
-    const incomeBreakdown: Record<string, number> = {};
+    const incomeBreakdown: Record<string, number> = Object.create(null);
     
     // Initialize breakdown for known incomes to 0
     plan.incomes.forEach(i => incomeBreakdown[i.name] = 0);
 
     plan.incomes.forEach(inc => {
-      // Default to retirement age if endAge is not specified (undefined or 0)
-      const endAge = (inc.endAge && inc.endAge > 0) ? inc.endAge : plan.retirementAge;
-
-      if (age >= inc.startAge && age <= endAge) {
+      if (isCashFlowActive(inc, age, plan.retirementAge)) {
         const yearsActive = age - inc.startAge;
         const growthMultiplier = Math.pow(1 + (inc.growthRate / 100), yearsActive);
         let amount = inc.value * growthMultiplier;
@@ -56,10 +60,7 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
     // --- B. EXPENSES ---
     let yearlyExpenses = 0;
     plan.expenses.forEach(exp => {
-      // Default to MAX_AGE if endAge is not specified (undefined or 0)
-      const endAge = (exp.endAge && exp.endAge > 0) ? exp.endAge : MAX_AGE;
-
-      if (age >= exp.startAge && age <= endAge) {
+      if (isCashFlowActive(exp, age, maxAge)) {
         const yearsActive = age - plan.currentAge;
         const inflationRate = exp.type === 'medical' ? plan.inflation.medical : plan.inflation.general;
         const inflationMultiplier = Math.pow(1 + (inflationRate / 100), yearsActive);
@@ -71,8 +72,11 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
 
     // --- C. APPLY ORGANIC INTEREST (Growth before contribution) ---
     currentAssets.forEach(asset => {
-      asset.accumulatedValue *= (1 + (asset.interestRate / 100));
+      if (asset !== cashAsset || asset.accumulatedValue > 0) {
+        asset.accumulatedValue *= 1 + asset.interestRate / 100;
+      }
     });
+    cashBalance = cashAsset?.accumulatedValue ?? cashBalance;
 
     // --- D. DEBT GROWTH & MANDATORY PAYMENTS ---
     let totalDebtPaid = 0;
@@ -110,24 +114,15 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
     // Net Flow before investments
     const essentialOutflows = yearlyExpenses + totalDebtPaid;
     
-    // Calculate available liquidity. 
-    // This is the Cash Asset Value (already grown by interest in step C) + Current Year Income - Essential Outflows
-    let availableLiquidity = 0;
-    if (cashAssetIndex !== -1) {
-       availableLiquidity = currentAssets[cashAssetIndex].accumulatedValue + yearlyIncome - essentialOutflows;
-    } else {
-       // If no cash asset exists, we assume pure cash flow logic
-       availableLiquidity = yearlyIncome - essentialOutflows;
-    }
+    let availableLiquidity = cashBalance + yearlyIncome - essentialOutflows;
 
     // Iterate through assets in the order defined by the user (Priority based on index)
-    currentAssets.forEach((asset, index) => {
+    currentAssets.forEach(asset => {
       // Skip the cash wallet itself (we don't "invest" in cash, it catches the overflow)
-      if (index === cashAssetIndex) return;
+      if (asset === cashAsset) return;
 
-      const start = asset.contributionStartAge || plan.currentAge;
-      // Default to MAX_AGE if endAge is not specified (undefined or 0)
-      const end = (asset.contributionEndAge && asset.contributionEndAge > 0) ? asset.contributionEndAge : MAX_AGE;
+      const start = asset.contributionStartAge;
+      const end = asset.contributionEndAge || maxAge;
 
       if (age >= start && age <= end) {
         // Calculate Target Contribution
@@ -154,51 +149,26 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
     });
 
     // --- F. REBALANCING CASH & DRAWDOWN ---
-    // Net Cash Flow = Income - Expenses - Debt Payments - Asset Contributions
-    // Note: totalInvestments is now guaranteed to be <= available liquidity, so we shouldn't create a new deficit from investing.
-    const netCashFlow = yearlyIncome - yearlyExpenses - totalDebtPaid - totalInvestments;
+    const netCashFlow = yearlyIncome - essentialOutflows - totalInvestments;
+    cashBalance += netCashFlow;
 
-    if (cashAssetIndex !== -1) {
-      currentAssets[cashAssetIndex].accumulatedValue += netCashFlow;
+    for (const asset of currentAssets) {
+      if (cashBalance >= 0) break;
+      if (asset === cashAsset || asset.accumulatedValue <= 0 || isIlliquid(asset.name)) continue;
 
-      // AUTOMATIC DRAWDOWN LOGIC:
-      // If Cash is negative (deficit), specifically during retirement or high expense years,
-      // we must sell/withdraw from other liquid assets to cover the hole.
-      if (currentAssets[cashAssetIndex].accumulatedValue < 0) {
-        const deficit = Math.abs(currentAssets[cashAssetIndex].accumulatedValue);
-        let remainingDeficit = deficit;
-
-        // Iterate through other assets to find funds
-        for (const asset of currentAssets) {
-          // Skip the cash wallet itself and skip illiquid assets (House/Car)
-          if (asset === currentAssets[cashAssetIndex]) continue;
-          if (isIlliquid(asset.name)) continue;
-
-          if (asset.accumulatedValue > 0) {
-            const withdrawAmount = Math.min(asset.accumulatedValue, remainingDeficit);
-            asset.accumulatedValue -= withdrawAmount;
-            remainingDeficit -= withdrawAmount;
-            
-            if (remainingDeficit <= 0) break;
-          }
-        }
-
-        // Refill the Cash wallet with what we withdrew
-        // New Cash Balance = Old Negative Balance + Withdrawn Amount
-        currentAssets[cashAssetIndex].accumulatedValue += (deficit - remainingDeficit);
-      }
+      const withdrawal = Math.min(asset.accumulatedValue, -cashBalance);
+      asset.accumulatedValue -= withdrawal;
+      cashBalance += withdrawal;
     }
+    if (cashAsset) cashAsset.accumulatedValue = cashBalance;
 
     // --- G. SNAPSHOT ---
-    const totalAssetValue = currentAssets.reduce((sum, a) => sum + a.accumulatedValue, 0);
+    const totalAssetValue = currentAssets.reduce((sum, a) => sum + a.accumulatedValue, cashAsset ? 0 : cashBalance);
     const totalDebtValue = currentDebts.reduce((sum, d) => sum + d.remainingBalance, 0);
     
     // Breakdown for charts
-    const assetBreakdown: Record<string, number> = {};
-    currentAssets.forEach(a => assetBreakdown[a.name] = a.accumulatedValue);
-
-    const debtBreakdown: Record<string, number> = {};
-    currentDebts.forEach(d => debtBreakdown[d.name] = d.remainingBalance);
+    const assetBreakdown = Object.fromEntries(currentAssets.map(a => [a.id, a.accumulatedValue]));
+    const debtBreakdown = Object.fromEntries(currentDebts.map(d => [d.id, d.remainingBalance]));
 
     results.push({
       age,
@@ -210,7 +180,8 @@ export const calculateProjections = (plan: FinancialPlan): SimulationResult[] =>
       totalExpenses: Math.round(yearlyExpenses),
       totalInvestments: Math.round(totalInvestments),
       totalDebtPayments: Math.round(totalDebtPaid),
-      liquidCash: Math.round(netCashFlow), 
+      liquidCash: Math.round(netCashFlow),
+      cashBalance,
       isRetired,
       assetBreakdown,
       debtBreakdown,

@@ -1,9 +1,10 @@
 
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useId, useRef, useMemo } from 'react';
 import { FinancialPlan, Language } from '../types';
 import { t } from '../utils/locales';
-import { formatCurrency } from '../utils/finance';
+import { calculateProjections, formatCurrency, getCashAssetIndex } from '../utils/finance';
+import { AGE_LIMITS, AMOUNT_LIMITS, BALANCE_LIMITS, isAllowedNumber, NumberLimits, RATE_LIMITS } from '../utils/plan';
 
 interface InputFormProps {
   plan: FinancialPlan;
@@ -33,13 +34,24 @@ const Section = ({ title, children, className = "" }: { title: string, children?
   </div>
 );
 
-const Input = ({ label, value, onChange, type = "number", className = "", placeholder = "", disabled = false }: any) => {
-  const [localValue, setLocalValue] = useState(value !== undefined ? value.toString() : "");
+type InputProps = { label: string; className?: string; placeholder?: string } & (
+  | { type: 'text'; value: string; onChange: (value: string) => void }
+  | { type?: 'number'; value: number | ''; onChange: (value: number) => void; limits?: NumberLimits; optional?: boolean }
+);
+
+const Input = (props: InputProps) => {
+  const { label, value, className = '', placeholder } = props;
+  const inputId = useId();
+  const [localValue, setLocalValue] = useState(String(value));
   const inputRef = useRef<HTMLInputElement>(null);
+  const isNumeric = props.type !== 'text';
+  const limits = isNumeric ? props.limits ?? AMOUNT_LIMITS : AMOUNT_LIMITS;
+  const numberValue = localValue.trim() ? Number(localValue) : undefined;
+  const invalid = isNumeric && numberValue !== undefined && !isAllowedNumber(numberValue, limits);
 
   useEffect(() => {
     if (document.activeElement !== inputRef.current) {
-      setLocalValue(value !== undefined ? value.toString() : "");
+      setLocalValue(String(value));
     }
   }, [value]);
 
@@ -47,28 +59,24 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
     const rawValue = e.target.value;
     setLocalValue(rawValue);
 
-    if (type === 'number') {
-      if (rawValue === '') {
-        onChange(0);
-      } else {
-        const parsed = parseFloat(rawValue);
-        if (!isNaN(parsed)) {
-          onChange(parsed);
-        }
-      }
-    } else {
-      onChange(rawValue);
+    if (props.type === 'text') {
+      props.onChange(rawValue);
+    } else if (rawValue.trim() && isAllowedNumber(Number(rawValue), limits)) {
+      props.onChange(Number(rawValue));
     }
   };
 
   const handleBlur = () => {
-    if (type === 'number') {
-      const num = parseFloat(localValue);
-      if (isNaN(num) || localValue === '') {
-        setLocalValue(value !== undefined ? value.toString() : "0");
-      } else {
-        setLocalValue(num.toString());
-      }
+    if (props.type === 'text') return;
+
+    if (props.optional && (numberValue === undefined || numberValue === 0)) {
+      props.onChange(0);
+      setLocalValue('');
+    } else if (numberValue === undefined && limits === AMOUNT_LIMITS) {
+      props.onChange(0);
+      setLocalValue('0');
+    } else {
+      setLocalValue(String(value));
     }
   };
 
@@ -78,41 +86,54 @@ const Input = ({ label, value, onChange, type = "number", className = "", placeh
 
   return (
     <div className={`flex flex-col ${className}`}>
-      {label && <label className="text-xs font-semibold text-slate-500 mb-1">{label}</label>}
+      <label htmlFor={inputId} className="text-xs font-semibold text-slate-500 mb-1">{label}</label>
       <input
         ref={inputRef}
-        type={type === 'number' ? 'text' : type} 
-        inputMode={type === 'number' ? 'decimal' : undefined}
+        id={inputId}
+        type="text"
+        inputMode={isNumeric ? (limits.integer ? 'numeric' : 'decimal') : undefined}
+        aria-invalid={invalid || undefined}
         value={localValue}
         placeholder={placeholder}
         onChange={handleChange}
         onBlur={handleBlur}
         onFocus={handleFocus}
-        disabled={disabled}
-        className={`w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+        className="w-full p-2 bg-slate-50 border border-slate-200 aria-[invalid=true]:border-red-500 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors"
       />
     </div>
   );
 };
 
-const Select = ({ label, value, onChange, options, className = "", disabled=false }: any) => (
-  <div className={`flex flex-col ${className}`}>
-    {label && <label className="text-xs font-semibold text-slate-500 mb-1">{label}</label>}
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className={`w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
-    >
-      {options.map((opt: any) => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
-  </div>
-);
+interface SelectProps<T extends string> {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
+  className?: string;
+}
+
+function Select<T extends string>({ label, value, onChange, options, className = '' }: SelectProps<T>) {
+  const inputId = useId();
+  return (
+    <div className={`flex flex-col ${className}`}>
+      <label htmlFor={inputId} className="text-xs font-semibold text-slate-500 mb-1">{label}</label>
+      <select
+        id={inputId}
+        value={value}
+        onChange={event => onChange(event.target.value as T)}
+        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-colors"
+      >
+        {options.map(option => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) => {
   const [draggedItem, setDraggedItem] = useState<{ listKey: keyof FinancialPlan, index: number } | null>(null);
+  const cashAssetIndex = getCashAssetIndex(plan.assets);
   
   const updatePlan = (key: keyof FinancialPlan, value: any) => {
     onChange({ ...plan, [key]: value });
@@ -158,8 +179,8 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, listKey: keyof FinancialPlan, index: number) => {
     setDraggedItem({ listKey, index });
-    // Required for Firefox
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -185,40 +206,13 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
     setDraggedItem(null);
   };
 
-  // --- Real-time Validation Logic ---
-  const validationResult = useMemo(() => {
-    const currentAge = plan.currentAge;
-    const annualize = (val: number, freq: 'monthly' | 'yearly') => freq === 'monthly' ? val * 12 : val;
-
-    const totalIncome = plan.incomes
-      .filter(i => currentAge >= i.startAge && (!i.endAge || currentAge <= i.endAge))
-      .reduce((sum, i) => sum + annualize(i.value, i.frequency), 0);
-
-    const totalExpenses = plan.expenses
-      .filter(e => currentAge >= e.startAge && (!e.endAge || currentAge <= e.endAge))
-      .reduce((sum, e) => sum + annualize(e.value, e.frequency), 0);
-
-    const totalInvestments = plan.assets
-      .filter(a => currentAge >= a.contributionStartAge && (!a.contributionEndAge || currentAge <= a.contributionEndAge))
-      .reduce((sum, a) => sum + annualize(a.contributionAmount, a.contributionFrequency), 0);
-
-    const totalDebtPayments = plan.debtPayments
-      .reduce((sum, p) => sum + annualize(p.amount, p.frequency) + (p.extraYearlyAmount || 0), 0);
-
-    const totalOutflow = totalExpenses + totalInvestments + totalDebtPayments;
-    const yearlyDeficit = totalOutflow - totalIncome;
-    
-    return {
-      isDeficit: yearlyDeficit > 0,
-      monthlyDeficit: yearlyDeficit / 12
-    };
-  }, [plan]);
+  const monthlyDeficit = useMemo(() => -(calculateProjections(plan)[0]?.liquidCash ?? 0) / 12, [plan]);
 
   return (
     <div className="max-w-4xl mx-auto pb-24 space-y-6">
       
       {/* Warning Banner */}
-      {validationResult.isDeficit && (
+      {monthlyDeficit > 0 && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r shadow-sm sticky top-0 z-10">
           <div className="flex items-start">
              <div className="flex-shrink-0">
@@ -229,7 +223,7 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
              <div className="ml-3">
                <h3 className="text-sm font-medium text-red-800">{t('warn_deficit_title', lang)}</h3>
                <div className="mt-1 text-sm text-red-700">
-                 {t('warn_deficit_msg', lang).replace('{amount}', formatCurrency(validationResult.monthlyDeficit, plan.currency))}
+                 {t('warn_deficit_msg', lang).replace('{amount}', formatCurrency(monthlyDeficit, plan.currency))}
                </div>
              </div>
           </div>
@@ -239,9 +233,10 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
       {/* 1. Profile & Inflation */}
       <Section title={t('section_profile', lang)}>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Input label={t('age_current', lang)} value={plan.currentAge} onChange={(v: number) => updatePlan('currentAge', v)} />
-          <Input label={t('age_retire', lang)} value={plan.retirementAge} onChange={(v: number) => updatePlan('retirementAge', v)} />
-          <Input label={t('age_max', lang)} value={plan.maxAge} onChange={(v: number) => updatePlan('maxAge', v)} />
+          <Input label={t('age_current', lang)} value={plan.currentAge} limits={AGE_LIMITS}
+            onChange={currentAge => onChange({ ...plan, currentAge, maxAge: Math.max(plan.maxAge, currentAge) })} />
+          <Input label={t('age_retire', lang)} value={plan.retirementAge} limits={AGE_LIMITS} onChange={v => updatePlan('retirementAge', v)} />
+          <Input label={t('age_max', lang)} value={plan.maxAge} limits={{ ...AGE_LIMITS, min: plan.currentAge }} onChange={v => updatePlan('maxAge', v)} />
           <Select 
             label={t('lbl_currency', lang)} 
             value={plan.currency || 'USD'} 
@@ -250,8 +245,8 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
           />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-slate-50">
-          <Input label={t('inf_gen', lang)} value={plan.inflation.general} onChange={(v: number) => updateInflation('general', v)} />
-          <Input label={t('inf_med', lang)} value={plan.inflation.medical} onChange={(v: number) => updateInflation('medical', v)} />
+          <Input label={t('inf_gen', lang)} value={plan.inflation.general} limits={RATE_LIMITS} onChange={v => updateInflation('general', v)} />
+          <Input label={t('inf_med', lang)} value={plan.inflation.medical} limits={RATE_LIMITS} onChange={v => updateInflation('medical', v)} />
         </div>
       </Section>
 
@@ -261,8 +256,7 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
           <span className="font-bold">Note:</span> {t('note_priority', lang)}
         </p>
         {plan.assets.map((item, index) => {
-          const lowerName = item.name.toLowerCase();
-          const isCash = lowerName.includes('cash') || lowerName.includes('saving');
+          const isCash = index === cashAssetIndex;
           return (
             <div 
               key={item.id} 
@@ -280,8 +274,8 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                  <div className="flex-1">
                     <div className="grid grid-cols-12 gap-3 items-end mb-3">
                       <Input className="col-span-6 md:col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('assets', item.id, 'name', v)} />
-                      <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('assets', item.id, 'value', v)} />
-                      <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('assets', item.id, 'interestRate', v)} />
+                      <Input className="col-span-3" label={t('col_value', lang)} value={item.value} limits={BALANCE_LIMITS} onChange={v => updateItem('assets', item.id, 'value', v)} />
+                      <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} limits={RATE_LIMITS} onChange={v => updateItem('assets', item.id, 'interestRate', v)} />
                       <button onClick={() => removeItem('assets', item.id)} className="col-span-12 md:col-span-1 text-red-400 hover:text-red-600 flex justify-end md:justify-center md:pb-2">×</button>
                     </div>
                     
@@ -292,15 +286,15 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                       </div>
                       {isCash ? (
                         <div className="col-span-10 flex items-center text-xs text-slate-400 italic pl-1">
-                          * Cash/Savings absorb surplus income automatically. Manual contribution disabled.
+                          {t('note_cash_account', lang)}
                         </div>
                       ) : (
                         <>
                           <Input className="col-span-4 md:col-span-2" label={t('col_amt', lang)} value={item.contributionAmount} onChange={(v: number) => updateItem('assets', item.id, 'contributionAmount', v)} />
                           <Select className="col-span-4 md:col-span-2" label={t('col_freq', lang)} value={item.contributionFrequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('assets', item.id, 'contributionFrequency', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_start', lang)} value={item.contributionStartAge} onChange={(v: number) => updateItem('assets', item.id, 'contributionStartAge', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_end', lang)} value={item.contributionEndAge || ''} placeholder={plan.maxAge.toString()} onChange={(v: number) => updateItem('assets', item.id, 'contributionEndAge', v)} />
-                          <Input className="col-span-2 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} onChange={(v: number) => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_start', lang)} value={item.contributionStartAge} limits={AGE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionStartAge', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_end', lang)} value={item.contributionEndAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('assets', item.id, 'contributionEndAge', v)} />
+                          <Input className="col-span-2 md:col-span-2" label={t('col_inc', lang)} value={item.contributionGrowthRate} limits={RATE_LIMITS} onChange={v => updateItem('assets', item.id, 'contributionGrowthRate', v)} />
                         </>
                       )}
                     </div>
@@ -343,7 +337,7 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
             <div className="flex-1 grid grid-cols-12 gap-2 items-end">
                <Input className="col-span-5" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('debts', item.id, 'name', v)} />
                <Input className="col-span-3" label={t('col_value', lang)} value={item.value} onChange={(v: number) => updateItem('debts', item.id, 'value', v)} />
-               <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} onChange={(v: number) => updateItem('debts', item.id, 'interestRate', v)} />
+               <Input className="col-span-3" label={t('col_rate', lang)} value={item.interestRate} limits={RATE_LIMITS} onChange={v => updateItem('debts', item.id, 'interestRate', v)} />
                <button onClick={() => removeItem('debts', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
             </div>
           </div>
@@ -374,16 +368,16 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                <Input className="col-span-3" label={t('col_name', lang)} type="text" value={item.name} onChange={(v: string) => updateItem('incomes', item.id, 'name', v)} />
                <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('incomes', item.id, 'value', v)} />
                <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('incomes', item.id, 'frequency', v)} />
-               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} onChange={(v: number) => updateItem('incomes', item.id, 'startAge', v)} />
-               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} placeholder={plan.retirementAge.toString()} onChange={(v: number) => updateItem('incomes', item.id, 'endAge', v)} />
-               <Input className="col-span-2" label={t('col_inc', lang)} value={item.growthRate} onChange={(v: number) => updateItem('incomes', item.id, 'growthRate', v)} />
+               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('incomes', item.id, 'startAge', v)} />
+               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.retirementAge.toString()} onChange={v => updateItem('incomes', item.id, 'endAge', v)} />
+               <Input className="col-span-2" label={t('col_inc', lang)} value={item.growthRate} limits={RATE_LIMITS} onChange={v => updateItem('incomes', item.id, 'growthRate', v)} />
                <button onClick={() => removeItem('incomes', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
              </div>
           </div>
         ))}
          {plan.incomes.length < 20 && (
           <button 
-             onClick={() => addItem('incomes', { id: Date.now().toString(), name: 'Work', value: 0, frequency: 'monthly', startAge: plan.currentAge, growthRate: 0 })}
+             onClick={() => addItem('incomes', { id: Date.now().toString(), name: 'Work', value: 0, interestRate: 0, frequency: 'monthly', startAge: plan.currentAge, growthRate: 0 })}
              className="text-sm text-blue-600 font-medium hover:underline"
           >
             {t('btn_add', lang)}
@@ -408,15 +402,15 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                <Input className="col-span-2" label={t('col_amt', lang)} value={item.value} onChange={(v: number) => updateItem('expenses', item.id, 'value', v)} />
                <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('expenses', item.id, 'frequency', v)} />
                <Select className="col-span-2" label="Type" value={item.type || 'general'} options={[{value: 'general', label: 'Gen'}, {value: 'medical', label: 'Med'}]} onChange={(v: string) => updateItem('expenses', item.id, 'type', v)} />
-               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge || plan.currentAge} onChange={(v: number) => updateItem('expenses', item.id, 'startAge', v)} />
-               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} placeholder={plan.maxAge.toString()} onChange={(v: number) => updateItem('expenses', item.id, 'endAge', v)} />
+               <Input className="col-span-1" label={t('col_start', lang)} value={item.startAge} limits={AGE_LIMITS} onChange={v => updateItem('expenses', item.id, 'startAge', v)} />
+               <Input className="col-span-1" label={t('col_end', lang)} value={item.endAge || ''} limits={AGE_LIMITS} optional placeholder={plan.maxAge.toString()} onChange={v => updateItem('expenses', item.id, 'endAge', v)} />
                <button onClick={() => removeItem('expenses', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
             </div>
           </div>
         ))}
         {plan.expenses.length < 30 && (
           <button 
-             onClick={() => addItem('expenses', { id: Date.now().toString(), name: 'General', value: 0, frequency: 'monthly', startAge: plan.currentAge, type: 'general', growthRate: 0 })}
+             onClick={() => addItem('expenses', { id: Date.now().toString(), name: 'General', value: 0, interestRate: 0, frequency: 'monthly', startAge: plan.currentAge, type: 'general', growthRate: 0 })}
              className="text-sm text-blue-600 font-medium hover:underline"
           >
             {t('btn_add', lang)}
@@ -429,9 +423,7 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
         <p className="text-xs text-slate-400 mb-3 italic">
            * Payment entries are created automatically when debts are added. You can also add extra manual payments.
         </p>
-        {plan.debtPayments.map((item, index) => {
-           const linkedDebt = plan.debts.find(d => d.id === item.debtId);
-           return (
+        {plan.debtPayments.map((item, index) => (
             <div 
                key={item.id} 
                draggable
@@ -446,19 +438,17 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
                    className="col-span-3" 
                    label="Loan" 
                    value={item.debtId} 
-                   options={linkedDebt ? [{value: linkedDebt.id, label: linkedDebt.name}] : plan.debts.map(d => ({value: d.id, label: d.name}))} 
+                   options={plan.debts.map(debt => ({ value: debt.id, label: debt.name }))}
                    onChange={(v: string) => updateItem('debtPayments', item.id, 'debtId', v)} 
-                   disabled={!!linkedDebt}
                  />
                  <Input className="col-span-2" label={t('col_amt', lang)} value={item.amount} onChange={(v: number) => updateItem('debtPayments', item.id, 'amount', v)} />
                  <Select className="col-span-2" label={t('col_freq', lang)} value={item.frequency} options={[{value: 'monthly', label: t('lbl_monthly', lang)}, {value: 'yearly', label: t('lbl_yearly', lang)}]} onChange={(v: string) => updateItem('debtPayments', item.id, 'frequency', v)} />
                  <Input className="col-span-2" label="Extra/Yr" value={item.extraYearlyAmount} onChange={(v: number) => updateItem('debtPayments', item.id, 'extraYearlyAmount', v)} />
-                 <Input className="col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} onChange={(v: number) => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
+                 <Input className="col-span-2" label={t('col_inc', lang)} value={item.yearlyIncrement} limits={RATE_LIMITS} onChange={v => updateItem('debtPayments', item.id, 'yearlyIncrement', v)} />
                  <button onClick={() => removeItem('debtPayments', item.id)} className="col-span-1 text-red-400 hover:text-red-600 pb-2">×</button>
                </div>
             </div>
-           );
-        })}
+        ))}
         {plan.debts.length > 0 && (
            <button 
              onClick={() => addItem('debtPayments', { id: Date.now().toString(), debtId: plan.debts[0]?.id, amount: 0, frequency: 'monthly', extraYearlyAmount: 0, yearlyIncrement: 0 })}

@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, PieChart, Pie, Cell, Legend, BarChart, Bar } from 'recharts';
-import { FinancialPlan, Language } from '../types';
-import { calculateProjections, formatCompactCurrency, formatCurrency } from '../utils/finance';
+import type { TooltipContentProps } from 'recharts';
+import { FinancialPlan, Language, SimulationResult } from '../types';
+import { calculateProjections, formatCompactCurrency, formatCurrency, getCashAssetIndex, isCashFlowActive } from '../utils/finance';
 import { t } from '../utils/locales';
 
 interface DashboardProps {
@@ -13,38 +14,38 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'
 
 export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
   const data = useMemo(() => calculateProjections(plan), [plan]);
-  
-  const retirementYearData = data.find(d => d.age === plan.retirementAge) || data[data.length - 1];
   const endOfLifeData = data[data.length - 1];
-  const isSustainable = (endOfLifeData?.netWorth || 0) > 0;
+  const retirementYearData = data.find(d => d.age === plan.retirementAge);
+  const summaryYear = retirementYearData ?? (plan.retirementAge < plan.currentAge ? data[0] : endOfLifeData);
+  const firstShortfall = data.find(year => year.cashBalance < -0.005);
+  const isSustainable = !firstShortfall && (endOfLifeData?.netWorth ?? 0) > 0;
+  const status = firstShortfall
+    ? t('msg_shortfall', lang).replace('{age}', String(firstShortfall.age))
+    : t(isSustainable ? 'msg_sus' : 'msg_fail', lang);
+  const hasCashAccount = getCashAssetIndex(plan.assets) >= 0;
   
   // Prepare Pie Chart Data for Current Expenses
-  const expensePieData = plan.expenses.map(e => ({ name: e.name, value: e.frequency === 'monthly' ? e.value * 12 : e.value })).filter(d => d.value > 0);
+  const expensePieData = plan.expenses
+    .filter(expense => expense.value > 0 && isCashFlowActive(expense, plan.currentAge, plan.maxAge))
+    .map(expense => ({ id: expense.id, name: expense.name, value: expense.frequency === 'monthly' ? expense.value * 12 : expense.value }));
   const totalExpenseValue = expensePieData.reduce((sum, item) => sum + item.value, 0);
 
-  // Get keys for breakdown charts
-  const assetKeys = plan.assets.map(a => a.name);
-  const debtKeys = plan.debts.map(d => d.name);
   // Get unique income names for the stacked chart
   const incomeKeys = Array.from(new Set(plan.incomes.map(i => i.name)));
 
-  // Flatten data for breakdown charts
-  const chartData = data.map(d => ({
-    ...d,
-    ...d.assetBreakdown,
-    ...d.debtBreakdown,
-    ...d.incomeBreakdown
-  }));
-
-  const CustomTooltip = ({ active, payload, label, showPercentage = true }: any) => {
-    if (active && payload && payload.length) {
+  const CustomTooltip = (
+    { active, payload, label }: TooltipContentProps,
+    showPercentage = true,
+  ) => {
+    if (active && payload.length) {
       // Calculate total sum of the visible payload for percentage calculation
-      const total = payload.reduce((sum: number, entry: any) => sum + (typeof entry.value === 'number' ? entry.value : 0), 0);
+      const total = payload.reduce((sum, entry) => sum + (typeof entry.value === 'number' ? entry.value : 0), 0);
 
       return (
         <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs z-50">
-          <p className="font-bold text-slate-800 mb-1">Age {label}</p>
-          {payload.map((entry: any, index: number) => {
+          <p className="font-bold text-slate-800 mb-1">{t('chart_age', lang).replace('{age}', String(label ?? ''))}</p>
+          {payload.map((entry, index) => {
+            if (typeof entry.value !== 'number') return null;
             const percent = showPercentage && total > 0 ? ((entry.value / total) * 100).toFixed(1) : null;
             return (
               <div key={index} className="flex items-center gap-2 mb-1">
@@ -69,9 +70,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-          <p className="text-sm font-medium text-slate-500 mb-1">{t('stat_nw', lang)}</p>
+          <p className="text-sm font-medium text-slate-500 mb-1">
+            {t(retirementYearData ? 'stat_nw' : 'stat_nw_age', lang).replace('{age}', String(summaryYear.age))}
+          </p>
           <p className="text-3xl font-bold text-slate-800">
-            {formatCompactCurrency(retirementYearData?.netWorth || 0, plan.currency)}
+            {formatCompactCurrency(summaryYear.netWorth, plan.currency)}
           </p>
         </div>
 
@@ -80,14 +83,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
             {t('stat_sus', lang)}
           </p>
           <p className={`text-xl font-bold ${isSustainable ? 'text-emerald-800' : 'text-red-800'}`}>
-            {isSustainable ? t('msg_sus', lang) : t('msg_fail', lang)}
+            {status}
           </p>
         </div>
         
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-          <p className="text-sm font-medium text-slate-500 mb-1">Debt @ Retirement</p>
+          <p className="text-sm font-medium text-slate-500 mb-1">
+            {t(retirementYearData ? 'stat_debt' : 'stat_debt_age', lang).replace('{age}', String(summaryYear.age))}
+          </p>
           <p className="text-3xl font-bold text-red-500">
-            {formatCompactCurrency(retirementYearData?.totalDebt || 0, plan.currency)}
+            {formatCompactCurrency(summaryYear.totalDebt, plan.currency)}
           </p>
         </div>
       </div>
@@ -122,7 +127,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
                 tickLine={false}
               />
               {/* No percentage for wealth chart as categories are not additive */}
-              <Tooltip content={<CustomTooltip showPercentage={false} />} />
+              <Tooltip content={props => CustomTooltip(props, false)} />
               <ReferenceLine x={plan.retirementAge} stroke="#3b82f6" strokeDasharray="3 3" />
               
               <Area 
@@ -160,17 +165,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[350px] flex flex-col">
           <h3 className="text-lg font-bold text-slate-800 mb-4">{t('chart_income', lang)} (Yearly)</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+            <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="age" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(v) => formatCompactCurrency(v, plan.currency)} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip showPercentage={true} />} />
+              <Tooltip content={props => CustomTooltip(props)} />
               <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
               {incomeKeys.map((key, idx) => (
                 <Area 
                   key={key}
                   type="monotone"
-                  dataKey={key}
+                  dataKey={(row: SimulationResult) => row.incomeBreakdown[key]}
                   stackId="1"
                   stroke={COLORS[idx % COLORS.length]}
                   fill={COLORS[idx % COLORS.length]}
@@ -189,7 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="age" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(v) => formatCompactCurrency(v, plan.currency)} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip showPercentage={true} />} />
+              <Tooltip content={props => CustomTooltip(props)} />
               <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
               
               <Area stackId="1" type="monotone" dataKey="totalExpenses" name={t('section_expenses', lang)} stroke="#f59e0b" fill="#f59e0b" />
@@ -210,7 +215,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
             <YAxis tickFormatter={(v) => formatCompactCurrency(v, plan.currency)} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
             <Tooltip 
               cursor={{fill: '#f1f5f9'}}
-              content={<CustomTooltip showPercentage={false} />} // Single bar, no percentage needed
+              content={props => CustomTooltip(props, false)}
             />
             <ReferenceLine y={0} stroke="#94a3b8" />
             <Bar dataKey="liquidCash" name={t('chart_cashflow', lang)}>
@@ -229,22 +234,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[350px] flex flex-col">
           <h3 className="text-lg font-bold text-slate-800 mb-4">{t('chart_assets_detail', lang)}</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+            <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="age" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(v) => formatCompactCurrency(v, plan.currency)} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip showPercentage={true} />} />
+              <Tooltip content={props => CustomTooltip(props)} />
               <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
-              {assetKeys.map((key, idx) => (
+              {plan.assets.map((asset, idx) => (
                 <Line 
-                  key={key} 
+                  key={asset.id}
                   type="monotone" 
-                  dataKey={key} 
+                  dataKey={(row: SimulationResult) => row.assetBreakdown[asset.id]}
+                  name={asset.name}
                   stroke={COLORS[idx % COLORS.length]} 
                   strokeWidth={2} 
                   dot={false} 
                 />
               ))}
+              {!hasCashAccount && (
+                <Line type="monotone" dataKey="cashBalance" name={t('chart_cash_balance', lang)} stroke="#475569" strokeWidth={2} dot={false} />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -253,17 +262,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[350px] flex flex-col">
           <h3 className="text-lg font-bold text-slate-800 mb-4">{t('chart_debts_detail', lang)}</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+            <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="age" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(v) => formatCompactCurrency(v, plan.currency)} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip showPercentage={true} />} />
+              <Tooltip content={props => CustomTooltip(props)} />
               <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
-              {debtKeys.map((key, idx) => (
+              {plan.debts.map((debt, idx) => (
                 <Line 
-                  key={key} 
+                  key={debt.id}
                   type="monotone" 
-                  dataKey={key} 
+                  dataKey={(row: SimulationResult) => row.debtBreakdown[debt.id]}
+                  name={debt.name}
                   stroke={COLORS[idx % COLORS.length]} 
                   strokeWidth={2} 
                   dot={false} 
@@ -288,11 +298,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ plan, lang }) => {
                 dataKey="value"
               >
                 {expensePieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                  <Cell key={entry.id} fill={COLORS[(index + 3) % COLORS.length]} />
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value: number, name: string) => {
+                formatter={(value, name) => {
+                  if (typeof value !== 'number') return null;
                   const percent = totalExpenseValue > 0 ? ((value / totalExpenseValue) * 100).toFixed(1) : '0.0';
                   return [`${formatCompactCurrency(value, plan.currency)} (${percent}%)`, name];
                 }} 

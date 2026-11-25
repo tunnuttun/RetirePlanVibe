@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import type { GoogleGenAI } from '@google/genai';
 import { FinancialPlan, ChatMessage, Language } from '../types';
 import { calculateProjections } from '../utils/finance';
 import { generateFinancialAdvice } from '../services/geminiService';
@@ -8,9 +9,10 @@ import { t } from '../utils/locales';
 interface AIAdvisorProps {
   plan: FinancialPlan;
   lang: Language;
+  ai: GoogleGenAI;
 }
 
-export const AIAdvisor: React.FC<AIAdvisorProps> = ({ plan, lang }) => {
+export const AIAdvisor: React.FC<AIAdvisorProps> = ({ plan, lang, ai }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
@@ -44,7 +46,7 @@ export const AIAdvisor: React.FC<AIAdvisorProps> = ({ plan, lang }) => {
     setIsLoading(true);
 
     const projections = calculateProjections(plan);
-    const responseText = await generateFinancialAdvice(plan, projections, userMsg.text);
+    const responseText = await generateFinancialAdvice(ai, plan, projections, userMsg.text);
 
     const aiMsg: ChatMessage = {
       role: 'model',
@@ -89,18 +91,11 @@ export const AIAdvisor: React.FC<AIAdvisorProps> = ({ plan, lang }) => {
                   : 'bg-white border border-slate-100 text-slate-800 rounded-bl-none'
               }`}
             >
-              {msg.role === 'model' ? (
-                <div 
-                  className="prose prose-sm max-w-none prose-slate"
-                  dangerouslySetInnerHTML={{ 
-                    __html: msg.text
-                      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                      .replace(/\n/g, '<br />') 
-                  }} 
-                />
-              ) : (
-                msg.text
-              )}
+              <div className="whitespace-pre-wrap break-words">
+                {msg.role === 'model' ? msg.text.split(/\*\*([^*\n]+)\*\*/g).map((part, index) => (
+                  index % 2 ? <strong key={index}>{part}</strong> : part
+                )) : msg.text}
+              </div>
             </div>
           </div>
         ))}

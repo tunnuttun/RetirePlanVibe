@@ -9,6 +9,9 @@ const resources = {
     inputs: "Inputs",
     export: "Export",
     import: "Import",
+    import_success: "Plan loaded successfully.",
+    import_warning: "Plan loaded. Some missing or invalid values were corrected or skipped.",
+    import_error: "Could not read a retirement plan from this JSON file.",
     
     // Inputs
     section_profile: "Profile & Inflation",
@@ -44,9 +47,10 @@ const resources = {
     btn_remove: "Remove",
     
     note_priority: "Assets are prioritized from top to bottom. If liquidity is low, lower items may not receive contributions. Drag items to reorder.",
+    note_cash_account: "This account automatically receives surplus cash.",
 
     warn_deficit_title: "Budget Deficit Detected",
-    warn_deficit_msg: "Your total outflows (expenses + investments + debt) exceed your income by {amount}/month. Cash reserves will deplete rapidly.",
+    warn_deficit_msg: "Projected outflows exceed income this year by an average of {amount} per month.",
 
     // Dashboard
     chart_wealth: "Wealth Projection",
@@ -56,10 +60,16 @@ const resources = {
     chart_assets_detail: "Assets Growth by Type",
     chart_debts_detail: "Debt Payoff by Type",
     chart_expense: "Expense Breakdown",
+    chart_cash_balance: "Unallocated Cash",
+    chart_age: "Age {age}",
     stat_nw: "Net Worth @ Retirement",
+    stat_nw_age: "Net Worth at Age {age}",
+    stat_debt: "Debt @ Retirement",
+    stat_debt_age: "Debt at Age {age}",
     stat_sus: "Plan Sustainability",
-    msg_sus: "Assets last until End",
-    msg_fail: "Assets depleted early",
+    msg_sus: "Projected expenses covered",
+    msg_fail: "No net assets at end of plan",
+    msg_shortfall: "Cash shortfall at age {age}",
 
     // AI Advisor
     ai_welcome: "Hello! I am your AI financial assistant. I can analyze your plan and offer advice. What's on your mind?",
@@ -71,6 +81,9 @@ const resources = {
     inputs: "ข้อมูลนำเข้า",
     export: "ส่งออก",
     import: "นำเข้า",
+    import_success: "โหลดแผนสำเร็จ",
+    import_warning: "โหลดแผนแล้ว ระบบแก้ไขหรือข้ามข้อมูลบางส่วนที่ขาดหายหรือไม่ถูกต้อง",
+    import_error: "ไม่สามารถอ่านแผนเกษียณจากไฟล์ JSON นี้ได้",
     
     // Inputs
     section_profile: "ข้อมูลส่วนตัว & เงินเฟ้อ",
@@ -106,9 +119,10 @@ const resources = {
     btn_remove: "ลบ",
     
     note_priority: "ลำดับมีผลต่อการลงทุน (บนลงล่าง) หากสภาพคล่องไม่พอ รายการด้านล่างอาจไม่ถูกลงทุน ลากเพื่อจัดลำดับใหม่",
+    note_cash_account: "เงินสดส่วนเกินจะเข้าในบัญชีนี้โดยอัตโนมัติ",
     
     warn_deficit_title: "รายจ่ายเกินรายรับ",
-    warn_deficit_msg: "ยอดรวมรายจ่าย (ค่าใช้จ่าย+ลงทุน+หนี้) เกินรายรับอยู่ {amount}/เดือน เงินเก็บจะหมดลงอย่างรวดเร็ว",
+    warn_deficit_msg: "คาดว่าปีนี้มีเงินจ่ายออกมากกว่ารายรับเฉลี่ย {amount} ต่อเดือน",
 
     // Dashboard
     chart_wealth: "แนวโน้มความมั่งคั่ง",
@@ -118,10 +132,16 @@ const resources = {
     chart_assets_detail: "การเติบโตของทรัพย์สิน",
     chart_debts_detail: "การลดลงของหนี้สิน",
     chart_expense: "สัดส่วนรายจ่าย",
+    chart_cash_balance: "เงินสดคงเหลือ",
+    chart_age: "อายุ {age} ปี",
     stat_nw: "ความมั่งคั่ง ณ เกษียณ",
+    stat_nw_age: "ความมั่งคั่งสุทธิเมื่ออายุ {age} ปี",
+    stat_debt: "หนี้สิน ณ เกษียณ",
+    stat_debt_age: "หนี้สินเมื่ออายุ {age} ปี",
     stat_sus: "ความยั่งยืนของแผน",
-    msg_sus: "เงินพอใช้ตลอดแผน",
-    msg_fail: "เงินหมดก่อนกำหนด",
+    msg_sus: "คาดว่ามีเงินพอจ่ายตลอดแผน",
+    msg_fail: "ไม่เหลือทรัพย์สินสุทธิเมื่อสิ้นสุดแผน",
+    msg_shortfall: "เงินสดไม่พอเมื่ออายุ {age} ปี",
 
     // AI Advisor
     ai_welcome: "สวัสดีครับ! ผมคือผู้ช่วยทางการเงิน AI ของคุณ ผมสามารถวิเคราะห์แผนและให้คำแนะนำได้ มีอะไรให้ช่วยไหมครับ?",

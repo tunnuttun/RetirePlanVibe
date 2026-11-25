@@ -2,19 +2,23 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# RetirePlan
 
-This contains everything you need to run your app locally.
+RetirePlan projects retirement income, expenses, assets, and debt in USD or THB. Plans are saved in the current browser and can be exported or imported as JSON. The dashboard shows projected balances at the end of each age's year.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1EBjAEPC4APt4oJSeCpbwsu_TrUbAL7XO
+## Run locally
 
-## Run Locally
+Use Node.js 22 or 24.
 
-**Prerequisites:**  Node.js
+```sh
+npm ci
+npm run dev
+```
 
+## Deploy to Firebase Hosting
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```sh
+npm ci
+npm run build
+npx -y firebase-tools@latest deploy --only hosting
+```
