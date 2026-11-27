@@ -16,6 +16,11 @@ export function isAllowedNumber(value: unknown, limits: NumberLimits): value is 
     value >= limits.min && value <= limits.max && (!limits.integer || Number.isInteger(value));
 }
 
+export function planInputs(plan: FinancialPlan): Omit<FinancialPlan, 'planName'> {
+  const { planName, ...inputs } = readPlan(plan).plan;
+  return JSON.parse(JSON.stringify(inputs));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -10,6 +10,7 @@ interface InputFormProps {
   plan: FinancialPlan;
   onChange: (newPlan: FinancialPlan) => void;
   lang: Language;
+  savedName?: boolean;
 }
 
 const GripIcon = () => (
@@ -138,7 +139,7 @@ function Select<T extends string>({ label, value, onChange, options, className =
   );
 }
 
-export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) => {
+export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang, savedName }) => {
   const [draggedItem, setDraggedItem] = useState<{ listKey: keyof FinancialPlan, index: number } | null>(null);
   const cashAssetIndex = getCashAssetIndex(plan.assets);
   const inflationOptions = plan.inflation.map(category => ({ value: category.id, label: category.name }));
@@ -263,7 +264,7 @@ export const InputForm: React.FC<InputFormProps> = ({ plan, onChange, lang }) =>
       )}
 
       <Section title={t('section_profile', lang)}>
-        <Input label={t('lbl_plan_name', lang)} type="text" value={plan.planName} placeholder={t('plan_name_placeholder', lang)} onChange={name => updatePlan('planName', name)} />
+        {!savedName && <Input label={t('lbl_plan_name', lang)} type="text" value={plan.planName} placeholder={t('plan_name_placeholder', lang)} onChange={name => updatePlan('planName', name)} />}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Input label={t('age_current', lang)} value={plan.currentAge} limits={AGE_LIMITS} commitOnBlur onChange={updateCurrentAge} />
           <Input label={t('age_retire', lang)} value={plan.retirementAge} limits={AGE_LIMITS} commitOnBlur onChange={updateRetirementAge} />
