@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   group: retireplan-production
-  cancel-in-progress: false
+  queue: max
 
 env:
   FIREBASE_TOOLS_VERSION: '15.37.0'

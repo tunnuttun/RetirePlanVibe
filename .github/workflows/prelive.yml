@@ -63,6 +63,10 @@ jobs:
     needs: verify
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    concurrency:
+      # Firebase updates the project's authorized preview domains as one list.
+      group: retireplan-prelive-hosting
+      queue: max
     permissions:
       contents: read
       id-token: write
