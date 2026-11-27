@@ -1,0 +1,140 @@
+name: PR verification and prelive
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retireplan-prelive-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  FIREBASE_TOOLS_VERSION: '15.37.0'
+
+jobs:
+  verify:
+    name: Verify PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        if: ${{ hashFiles('firestore.rules') != '' }}
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run test:rules
+        if: ${{ hashFiles('firestore.rules') != '' }}
+      - name: Build prelive site
+        run: |
+          if [ -f firestore.rules ] && [ "$SAME_REPO" = true ]; then
+            node -e 'const { projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (!projectId || projectId !== process.env.PRELIVE_PROJECT || projectId === "retireplan-vibe") throw Error("Check the prelive Firebase web config and project ID.");'
+          fi
+          npm run build
+        # Firebase client configuration is public. Forks can build the guest app without it.
+        env:
+          VITE_FIREBASE_CONFIG: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.PRELIVE_FIREBASE_WEB_CONFIG || '' }}
+          PRELIVE_PROJECT: ${{ vars.PRELIVE_FIREBASE_PROJECT_ID }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          name: prelive-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish prelive
+    needs: verify
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    environment:
+      name: prelive
+      url: ${{ steps.hosting.outputs.url }}
+    env:
+      PRELIVE_PROJECT: ${{ vars.PRELIVE_FIREBASE_PROJECT_ID }}
+      CHANNEL: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: prelive-dist
+          path: dist
+      - name: Prepare preview deployment
+        run: |
+          if [[ ! "$PRELIVE_PROJECT" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ || "$PRELIVE_PROJECT" = retireplan-vibe ]]; then
+            echo 'Set PRELIVE_FIREBASE_PROJECT_ID to the separate prelive project.' >&2
+            exit 1
+          fi
+          # A PR supplies static assets. The deploy job supplies its own Hosting config.
+          cat > firebase.json <<'JSON'
+          {
+            "hosting": {
+              "public": "dist",
+              "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+              "headers": [
+                {
+                  "source": "/assets/**",
+                  "headers": [{"key": "Cache-Control", "value": "public, max-age=31536000, immutable"}]
+                }
+              ]
+            }
+          }
+          JSON
+          npm install --prefix "$RUNNER_TEMP/firebase-cli" --no-audit --no-fund "firebase-tools@$FIREBASE_TOOLS_VERSION"
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.PRELIVE_HOSTING_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.PRELIVE_HOSTING_SERVICE_ACCOUNT }}
+      - name: Deploy preview channel
+        id: hosting
+        run: |
+          "$RUNNER_TEMP/firebase-cli/node_modules/.bin/firebase" hosting:channel:deploy "$CHANNEL" \
+            --project "$PRELIVE_PROJECT" --expires 7d --non-interactive --json > "$RUNNER_TEMP/preview.json"
+          url="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const output = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const url = new URL(Object.values(output.result)[0].url);
+            if (url.protocol !== "https:" || !url.hostname.startsWith(process.env.PRELIVE_PROJECT + "--") || !url.hostname.endsWith(".web.app")) {
+              throw Error("Unexpected Firebase preview URL");
+            }
+            console.log(url.href);
+          ' "$RUNNER_TEMP/preview.json")"
+          curl --fail --silent --show-error --retry 4 --retry-all-errors --max-time 20 "$url" -o /dev/null
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "[Open the prelive site]($url)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Update preview link on PR
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.hosting.outputs.url }}
+        with:
+          script: |
+            const marker = '<!-- retireplan-prelive -->';
+            const body = `${marker}\n[Open the RetirePlan prelive site](${process.env.PREVIEW_URL})\n\nThe link expires seven days after the latest deployment.`;
+            const issue = { ...context.repo, issue_number: context.issue.number };
+            const comments = await github.paginate(github.rest.issues.listComments, issue);
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...issue, body });
+            }
