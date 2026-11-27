@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   group: retireplan-production
-  cancel-in-progress: false
+  queue: max
 
 env:
   FIREBASE_TOOLS_VERSION: '15.37.0'
@@ -35,7 +35,7 @@ jobs:
           VITE_FIREBASE_CONFIG: ${{ vars.PRODUCTION_FIREBASE_WEB_CONFIG }}
         run: |
           if [ -f firestore.rules ]; then
-            node -e 'const { projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (projectId !== process.env.PRODUCTION_PROJECT) throw Error("Check the production Firebase web config.");'
+            node -e 'const { apiKey, appId, authDomain, projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (![apiKey, appId, authDomain].every(value => typeof value === "string" && value) || projectId !== process.env.PRODUCTION_PROJECT) throw Error("Check the production Firebase web config.");'
             echo 'rules=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-java@v4
@@ -45,6 +45,10 @@ jobs:
           java-version: '21'
       - run: npm ci
       - run: npm run test:rules
+        if: steps.config.outputs.rules == 'true'
+      - run: npx playwright install --with-deps chromium
+        if: steps.config.outputs.rules == 'true'
+      - run: npm run test:browser
         if: steps.config.outputs.rules == 'true'
       - run: npm run build
         env:
