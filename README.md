@@ -33,7 +33,7 @@ Open a PR against `main` to run **Verify PR**. Branches in this repository also 
    | `PRODUCTION_IDENTITY_PROVIDER` / `PRODUCTION_DEPLOY_SERVICE_ACCOUNT` | Production identity with Hosting and Firestore rules deploy access |
    | `PRELIVE_RULES_IDENTITY_PROVIDER` / `PRELIVE_RULES_SERVICE_ACCOUNT` | Prelive identity with Firestore rules deploy access |
 
-3. Restrict federation to this repository's numeric ID and the relevant workflow. The prelive Hosting identity is for `pull_request` runs of `prelive.yml`. The production and prelive rules identities are for `push` runs of `production.yml` on `refs/heads/main`.
+3. Give each deploy service account its own Workload Identity pool. Restrict federation to this repository's numeric ID and the relevant workflow. The prelive Hosting identity is for `pull_request` runs of `prelive.yml`. The production and prelive rules identities are for `push` runs of `production.yml` on `refs/heads/main`.
 4. In GitHub, require a pull request and the **Verify PR** status check for `main`. Confirm the check has run before making it required.
 
 Use disposable plans on the prelive site. Previews share the reviewed prelive rules, while the verification job tests each PR's proposed rules in the emulator. Reviewed rules reach production before the website update and sync to prelive after release. Before the first saved-sets release, seed the tested rules in prelive to enable hosted testing. Use the previous Hosting version from the production job summary if a Hosting rollback is needed.
