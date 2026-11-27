@@ -35,10 +35,14 @@ jobs:
       - run: npm ci
       - run: npm run test:rules
         if: ${{ hashFiles('firestore.rules') != '' }}
+      - run: npx playwright install --with-deps chromium
+        if: ${{ hashFiles('tests/savedSets.browser.test.mjs') != '' }}
+      - run: npm run test:browser
+        if: ${{ hashFiles('tests/savedSets.browser.test.mjs') != '' }}
       - name: Build prelive site
         run: |
           if [ -f firestore.rules ] && [ "$SAME_REPO" = true ]; then
-            node -e 'const { projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (!projectId || projectId !== process.env.PRELIVE_PROJECT || projectId === "retireplan-vibe") throw Error("Check the prelive Firebase web config and project ID.");'
+            node -e 'const { apiKey, appId, authDomain, projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (![apiKey, appId, authDomain, projectId].every(value => typeof value === "string" && value) || projectId !== process.env.PRELIVE_PROJECT || projectId === "retireplan-vibe") throw Error("Check the prelive Firebase web config and project ID.");'
           fi
           npm run build
         # Firebase client configuration is public. Forks can build the guest app without it.

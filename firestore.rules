@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function ownsSets(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isAge(value) {
+      return value is int && value >= 0 && value <= 130;
+    }
+
+    function isValidInputs(inputs) {
+      let fields = [
+        'currentAge', 'retirementAge', 'maxAge', 'currency',
+        'inflation', 'assets', 'debts', 'incomes', 'expenses', 'debtPayments'
+      ];
+      // The client normalizes individual rows and cross-references on read and write.
+      return inputs is map && inputs.keys().hasAll(fields) && inputs.keys().hasOnly(fields)
+        && isAge(inputs.currentAge) && isAge(inputs.retirementAge) && isAge(inputs.maxAge)
+        && inputs.maxAge >= inputs.currentAge && inputs.currency in ['USD', 'THB']
+        && inputs.inflation is list && inputs.assets is list && inputs.debts is list
+        && inputs.incomes is list && inputs.expenses is list && inputs.debtPayments is list;
+    }
+
+    // users/{uid}/savedSets/{setId} stores the name, normalized inputs,
+    // optimistic save revision, and the server time of the last explicit open.
+    function isValidSet(data) {
+      let fields = ['name', 'inputs', 'revision', 'lastOpenedAt'];
+      return data.keys().hasAll(fields) && data.keys().hasOnly(fields)
+        && data.name is string && data.name.matches('(?s).*\\S.*')
+        && isValidInputs(data.inputs)
+        && data.revision is int && data.revision >= 1
+        && data.lastOpenedAt is timestamp;
+    }
+
+    function isValidUpdate() {
+      let updated = request.resource.data;
+      let changed = updated.diff(resource.data).affectedKeys();
+      return (changed.hasOnly(['lastOpenedAt']) && updated.lastOpenedAt == request.time)
+        || changed.hasOnly(['name'])
+        || (changed.hasOnly(['inputs', 'revision']) && changed.hasAll(['inputs', 'revision'])
+          && updated.revision == resource.data.revision + 1);
+    }
+
+    match /users/{uid}/savedSets/{setId} {
+      allow read, delete: if ownsSets(uid);
+      allow create: if ownsSets(uid) && isValidSet(request.resource.data)
+        && request.resource.data.revision == 1 && request.resource.data.lastOpenedAt == request.time;
+      allow update: if ownsSets(uid) && isValidSet(request.resource.data) && isValidUpdate();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

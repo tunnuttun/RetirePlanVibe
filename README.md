@@ -4,7 +4,7 @@
 
 # RetirePlan
 
-RetirePlan projects retirement income, expenses, assets, and debt in USD or THB. Plans are saved in the current browser and can be exported or imported as JSON. The dashboard shows projected balances at the end of each age's year.
+RetirePlan projects retirement income, expenses, assets, and debt in USD or THB. Guests keep one plan in the current browser. With Google sign-in, users can save named sets, open their last set on another device, and recover unsaved drafts on the browser where they edited. JSON import and export are available in both modes. The dashboard shows projected balances at the end of each age's year.
 
 ## Run locally
 
@@ -14,6 +14,15 @@ Use Node.js 22 or 24.
 npm ci
 npm run dev
 ```
+
+For local sign-in and persistence, use Java 21 and run these commands in separate terminals:
+
+```sh
+npx --yes firebase-tools@15.37.0 emulators:start --project demo-retireplan-vibe --only auth,firestore
+VITE_FIREBASE_USE_EMULATORS=true npm run dev
+```
+
+Run `npm run test:rules` with the Firestore emulator port free to verify rules in an isolated emulator. For browser verification, run `npx playwright install chromium` and `npm run test:browser`. To use a configured Firebase project, set `VITE_FIREBASE_CONFIG` to the public web SDK JSON in `.env.local`. Google sign-in uses an authorized Firebase Hosting domain in production.
 
 ## Releases
 
