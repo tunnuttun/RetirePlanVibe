@@ -1,10 +1,11 @@
 
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { InputForm } from './components/InputForm';
 import { FinancialPlan, DEFAULT_PLAN, ViewState, Language } from './types';
 import { t } from './utils/locales';
+import { readPlan } from './utils/plan';
 
 // Icons
 const ChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>;
@@ -12,111 +13,71 @@ const SlidersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" hei
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
 const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>;
 
+const PLAN_STORAGE_KEY = 'retireplan_data_v2';
+
+function loadSavedPlan(): FinancialPlan {
+  try {
+    const savedPlan = localStorage.getItem(PLAN_STORAGE_KEY);
+    if (savedPlan) return readPlan(JSON.parse(savedPlan)).plan;
+  } catch {
+    // The planner can still run when storage is blocked or its contents are invalid.
+  }
+  return DEFAULT_PLAN;
+}
+
 function App() {
-  const [plan, setPlan] = useState<FinancialPlan>(DEFAULT_PLAN);
+  const [plan, setPlan] = useState(loadSavedPlan);
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
   const [lang, setLang] = useState<Language>('en');
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importRequest = useRef(0);
 
-  // Persistence
   useEffect(() => {
-    const savedPlan = localStorage.getItem('retireplan_data_v2');
-    if (savedPlan) {
-      try {
-        setPlan(JSON.parse(savedPlan));
-      } catch (e) {
-        console.error("Failed to parse saved plan", e);
-      }
+    try {
+      localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(plan));
+    } catch {
+      // Explicit downloads are still available when automatic saves are blocked.
     }
-  }, []);
+  }, [plan]);
 
   useEffect(() => {
-    localStorage.setItem('retireplan_data_v2', JSON.stringify(plan));
-  }, [plan]);
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const handleExport = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(plan));
+    const name = plan.planName.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '');
+    const filename = name.toLowerCase().endsWith('.json') ? name : `${name || 'financial_plan'}.json`;
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `retirement_plan_${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchorNode.setAttribute("download", filename);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   };
 
-  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
     if (!file) return;
+    event.currentTarget.value = '';
+    const request = ++importRequest.current;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = JSON.parse(e.target?.result as string);
-        
-        const missingFields: string[] = [];
-        // Start with DEFAULT_PLAN to ensure valid structure and types. 
-        // We will overwrite this with data found in the JSON.
-        const safePlan: FinancialPlan = { ...DEFAULT_PLAN }; 
-
-        // Helper to safely assign fields from JSON if they exist and match type
-        const processField = <K extends keyof FinancialPlan>(key: K, type: 'number' | 'object' | 'array' | 'string') => {
-           if (json[key] === undefined) {
-             missingFields.push(key);
-             // We keep the value from DEFAULT_PLAN
-           } else {
-             if (type === 'array') {
-                if (Array.isArray(json[key])) {
-                    safePlan[key] = json[key] as any;
-                } else {
-                    missingFields.push(`${key} (expected array)`);
-                }
-             } else if (type === 'object') {
-                // For objects like 'inflation', we merge to preserve default sub-keys if missing
-                if (typeof json[key] === 'object' && json[key] !== null && !Array.isArray(json[key])) {
-                    safePlan[key] = { ...(safePlan[key] as any), ...json[key] };
-                } else {
-                    missingFields.push(`${key} (expected object)`);
-                }
-             } else {
-                if (typeof json[key] === type) {
-                    safePlan[key] = json[key];
-                } else {
-                    missingFields.push(`${key} (expected ${type})`);
-                }
-             }
-           }
-        };
-
-        // Validate and map specific fields, ignoring any extra junk in the JSON
-        processField('currentAge', 'number');
-        processField('retirementAge', 'number');
-        processField('maxAge', 'number');
-        processField('currency', 'string');
-        processField('inflation', 'object');
-        processField('assets', 'array');
-        processField('debts', 'array');
-        processField('incomes', 'array');
-        processField('expenses', 'array');
-        processField('debtPayments', 'array');
-
-        setPlan(safePlan);
-
-        if (missingFields.length > 0) {
-            alert(`Import completed with warnings.\n\nThe following fields were missing or invalid and have been reset to defaults:\n- ${missingFields.join('\n- ')}`);
-        } else {
-            alert("Plan loaded successfully!");
-        }
-      } catch (err) {
-        console.error("Import Error:", err);
-        alert("Error reading file. Please ensure it is a valid JSON file.");
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = ''; // Reset input to allow re-importing the same file
+    try {
+      const fallbackName = file.name.replace(/\.json$/i, '').trim() || DEFAULT_PLAN.planName;
+      const imported = readPlan(JSON.parse(await file.text()), fallbackName);
+      if (request !== importRequest.current) return;
+      setPlan(imported.plan);
+      alert(imported.warnings.length
+        ? `${t('import_warning', lang)}\n\n${imported.warnings.join(', ')}`
+        : t('import_success', lang));
+    } catch {
+      if (request === importRequest.current) alert(t('import_error', lang));
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      
+      <input ref={fileInput} type="file" accept=".json,application/json" onChange={handleImport} hidden />
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -152,10 +113,9 @@ function App() {
               >
                 <DownloadIcon /> {t('export', lang)}
               </button>
-              <label className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer">
+              <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors">
                 <UploadIcon /> {t('import', lang)}
-                <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-              </label>
+              </button>
             </div>
           </div>
         </div>
@@ -168,7 +128,7 @@ function App() {
       </main>
 
       {/* Mobile Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe z-30">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)] z-30">
         <div className="max-w-md mx-auto flex justify-around p-2">
           <button 
             onClick={() => setCurrentView(ViewState.DASHBOARD)}
@@ -194,10 +154,9 @@ function App() {
          <div className="md:hidden border-t border-slate-100 flex justify-center py-2 bg-slate-50 gap-4 text-xs text-slate-500">
            <button onClick={handleExport} className="hover:text-blue-600">{t('export', lang)}</button>
            <span className="text-slate-300">|</span>
-           <label className="cursor-pointer hover:text-blue-600">
+           <button onClick={() => fileInput.current?.click()} className="hover:text-blue-600">
              {t('import', lang)}
-             <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-           </label>
+           </button>
         </div>
       </nav>
 

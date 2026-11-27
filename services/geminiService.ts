@@ -1,13 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import type { GoogleGenAI } from "@google/genai";
 import { FinancialPlan, SimulationResult } from "../types";
 import { formatCurrency } from "../utils/finance";
 
-// Use import.meta.env for Vite, fallback to process.env if needed
-const API_KEY = import.meta.env.VITE_API_KEY || process.env.API_KEY;
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
 export const generateFinancialAdvice = async (
+  ai: GoogleGenAI,
   plan: FinancialPlan, 
   projections: SimulationResult[],
   userQuery: string
@@ -33,8 +29,7 @@ export const generateFinancialAdvice = async (
     - Retirement Age: ${plan.retirementAge}
     - Life Expectancy / Max Age: ${plan.maxAge}
     - Currency: ${plan.currency}
-    - General Inflation: ${plan.inflation.general}%
-    - Medical Inflation: ${plan.inflation.medical}%
+    - Inflation categories: ${plan.inflation.map(category => `${category.name}: ${category.value}%`).join(', ')}
     
     Assets & Contributions:
     ${assetSummary}
@@ -45,7 +40,7 @@ export const generateFinancialAdvice = async (
     - Net Worth at Retirement (${plan.retirementAge}): ${retirementYear ? formatCurrency(retirementYear.netWorth, plan.currency) : 'N/A'}
     - Total Debt at Retirement: ${retirementYear ? formatCurrency(retirementYear.totalDebt, plan.currency) : 'N/A'}
     - Net Worth at End of Plan (${endOfLife?.age || 'N/A'}): ${endOfLife ? formatCurrency(endOfLife.netWorth, plan.currency) : 'N/A'}
-    - Status: ${endOfLife && endOfLife.netWorth > 0 ? 'Sustainable' : 'Runs out of money'}
+    - First projected cash shortfall age: ${projections.find(p => p.cashBalance < -0.005)?.age ?? 'None'}
   `;
 
   const systemInstruction = `

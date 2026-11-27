@@ -1,0 +1,152 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retireplan-production
+  queue: max
+
+env:
+  FIREBASE_TOOLS_VERSION: '15.37.0'
+  PRODUCTION_PROJECT: retireplan-vibe
+
+jobs:
+  verify:
+    name: Verify merged commit
+    runs-on: ubuntu-latest
+    outputs:
+      rules: ${{ steps.config.outputs.rules }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check Firebase configuration
+        id: config
+        env:
+          VITE_FIREBASE_CONFIG: ${{ vars.PRODUCTION_FIREBASE_WEB_CONFIG }}
+        run: |
+          if [ -f firestore.rules ]; then
+            node -e 'const { apiKey, appId, authDomain, projectId } = JSON.parse(process.env.VITE_FIREBASE_CONFIG); if (![apiKey, appId, authDomain].every(value => typeof value === "string" && value) || projectId !== process.env.PRODUCTION_PROJECT) throw Error("Check the production Firebase web config.");'
+            echo 'rules=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-java@v6.3.0
+        if: steps.config.outputs.rules == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run test:rules
+        if: steps.config.outputs.rules == 'true'
+      - run: npx playwright install --with-deps chromium
+        if: steps.config.outputs.rules == 'true'
+      - run: npm run test:browser
+        if: steps.config.outputs.rules == 'true'
+      - run: npm run build
+        env:
+          VITE_FIREBASE_CONFIG: ${{ vars.PRODUCTION_FIREBASE_WEB_CONFIG }}
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: production-release
+          path: |
+            dist/
+            firebase.json
+            firestore.rules
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish production
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://retireplan-vibe.web.app
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+    steps:
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: production-release
+      - run: npm install --prefix "$RUNNER_TEMP/firebase-cli" --no-audit --no-fund "firebase-tools@$FIREBASE_TOOLS_VERSION"
+      - name: Check this is still the latest merge
+        id: revision
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const { data } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
+            const isLatest = data.object.sha === context.sha;
+            core.setOutput('latest', isLatest);
+            if (!isLatest) core.notice('A newer commit is on main. This run will skip production.');
+      - uses: google-github-actions/auth@v3
+        if: steps.revision.outputs.latest == 'true'
+        with:
+          workload_identity_provider: ${{ vars.PRODUCTION_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.PRODUCTION_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Deploy Firestore rules
+        if: steps.revision.outputs.latest == 'true' && needs.verify.outputs.rules == 'true'
+        run: '"$RUNNER_TEMP/firebase-cli/node_modules/.bin/firebase" deploy --only firestore:rules --project "$PRODUCTION_PROJECT" --non-interactive'
+      - name: Deploy live Hosting
+        id: release
+        if: steps.revision.outputs.latest == 'true'
+        run: |
+          firebase="$RUNNER_TEMP/firebase-cli/node_modules/.bin/firebase"
+          "$firebase" hosting:channel:list --project "$PRODUCTION_PROJECT" --non-interactive --json > "$RUNNER_TEMP/previous-hosting.json"
+          prior="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const output = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const channels = output.result.channels ?? output.result;
+            const live = channels.find(channel => channel.name.endsWith("/live"));
+            console.log(live?.release?.version?.name ?? "No prior live version recorded");
+          ' "$RUNNER_TEMP/previous-hosting.json")"
+          echo "Previous Hosting version: $prior" >> "$GITHUB_STEP_SUMMARY"
+          "$firebase" deploy --only hosting --project "$PRODUCTION_PROJECT" --non-interactive --message "$GITHUB_SHA"
+          echo "Deployed commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo 'released=true' >> "$GITHUB_OUTPUT"
+      - name: Check the live site
+        if: steps.release.outputs.released == 'true'
+        run: curl --fail --silent --show-error --retry 4 --retry-all-errors --max-time 20 "https://$PRODUCTION_PROJECT.web.app/" -o /dev/null
+
+  sync-prelive-rules:
+    name: Sync reviewed prelive rules
+    needs: [verify, publish]
+    if: needs.verify.outputs.rules == 'true' && needs.publish.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PRELIVE_PROJECT: ${{ vars.PRELIVE_FIREBASE_PROJECT_ID }}
+    steps:
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: production-release
+      - name: Prepare rules deployment
+        run: |
+          if [[ ! "$PRELIVE_PROJECT" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ || "$PRELIVE_PROJECT" = "$PRODUCTION_PROJECT" ]]; then
+            echo 'Set PRELIVE_FIREBASE_PROJECT_ID to the separate prelive project.' >&2
+            exit 1
+          fi
+          npm install --prefix "$RUNNER_TEMP/firebase-cli" --no-audit --no-fund "firebase-tools@$FIREBASE_TOOLS_VERSION"
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.PRELIVE_RULES_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.PRELIVE_RULES_SERVICE_ACCOUNT }}
+      - run: '"$RUNNER_TEMP/firebase-cli/node_modules/.bin/firebase" deploy --only firestore:rules --project "$PRELIVE_PROJECT" --non-interactive'
